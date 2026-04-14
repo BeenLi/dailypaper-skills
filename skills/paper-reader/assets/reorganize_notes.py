@@ -26,37 +26,47 @@ ZOTERO_DB = zotero_db_path()
 # 新的分类结构（与概念分类对应）
 # 优先级从上到下，越靠前越优先
 CATEGORY_RULES = {
-    # (目录名, 匹配规则 - tags 关键词)
-    # 具体任务优先
-    "4-足式运动": ["legged-locomotion", "quadruped", "bipedal", "locomotion", "parkour", "walking", "humanoid-locomotion", "足式", "腿式"],
-    "3-机器人策略": ["VLA", "imitation-learning", "manipulation", "grasping", "bi-manual", "teleoperation", "action-prediction", "embodied", "机器人策略", "移动操作", "mobile-manipulation"],
-    "5-导航与定位": ["VLN", "navigation", "SLAM", "localization", "mapping", "path-planning", "visual-navigation", "导航", "定位"],
-    "6-3D视觉": ["3DGS", "NeRF", "depth", "3D-vision", "reconstruction", "gaussian-splatting", "point-cloud", "mesh", "3D-generation", "novel-view", "depth-estimation", "PBD", "world-model"],
-    "7-无人机": ["drone", "UAV", "quadrotor", "aerial", "MAV", "无人机", "飞行器"],
-    "8-仿真器": ["simulation", "sim2real", "simulator", "synthetic-data", "domain-randomization", "仿真"],
-    "9-规划与控制": ["planning", "control", "MPC", "trajectory", "motion-planning", "规划", "控制"],
-    # 通用方法
-    "2-强化学习": ["reinforcement-learning", "RL", "PPO", "SAC", "reward", "policy-gradient", "强化学习", "GRPO"],
-    "1-生成模型": ["diffusion", "flow-matching", "generative", "GAN", "VAE", "autoregressive", "video-generation", "生成模型"],
-    "10-深度学习基础": ["transformer", "CNN", "attention", "backbone", "pre-training", "VLM", "LLM", "foundation-model", "深度学习"],
-    "11-物理仿真": ["physics", "dynamics", "contact", "friction", "deformable", "物理"],
-    "12-Survey": ["survey", "review", "benchmark", "tutorial", "综述"],
+    "1-Computer Architecture and Accelerators": [
+        "computer-architecture", "accelerator", "accelerator-design", "gpu",
+        "npu", "tpu", "asic", "fpga", "microarchitecture", "pipeline",
+        "transformer-accelerator", "chip", "device-placement",
+    ],
+    "2-Memory and Storage Systems": [
+        "memory", "memory-hierarchy", "cache", "kv-cache", "dram", "hbm",
+        "ssd", "storage", "tiered-memory", "disaggregation", "paging",
+        "prefetching", "cxl", "checkpointing",
+    ],
+    "3-Networking and Interconnects": [
+        "network", "datacenter-network", "interconnect", "rdma",
+        "collective-communication", "allreduce", "congestion-control",
+        "transport", "switch", "topology", "ethernet", "infiniband",
+    ],
+    "4-Distributed Systems": [
+        "distributed-systems", "cluster", "cluster-scheduling", "scheduler",
+        "serving", "llm-serving", "distributed-training", "fault-tolerance",
+        "resource-management", "data-parallel", "pipeline-parallel",
+        "tensor-parallel", "multi-tenant",
+    ],
+    "5-Compilers and Runtime Systems": [
+        "compiler", "runtime", "codegen", "kernel-fusion", "graph-compiler",
+        "operator-scheduling", "execution-engine", "jit", "autotuning",
+        "lowering", "runtime-system",
+    ],
+    "6-Performance, Evaluation and Benchmarking": [
+        "benchmark", "benchmarking", "evaluation", "profiling", "throughput",
+        "latency", "performance-analysis", "roofline", "trace", "measurement",
+        "simulation-study",
+    ],
 }
 
 # Zotero 分类 ID 映射（需要根据实际情况更新）
 ZOTERO_COLLECTION_MAP = {
-    "1-生成模型": None,  # 需要在 Zotero 中创建
-    "2-强化学习": 31,    # 2-DRL
-    "3-机器人策略": 36,  # VLA
-    "4-足式运动": 26,    # Locomotion
-    "5-导航与定位": 43,  # VLN
-    "6-3D视觉": 13,      # 3-3D Vision
-    "7-无人机": None,
-    "8-仿真器": 32,      # 0-Simulation
-    "9-规划与控制": None,
-    "10-深度学习基础": 2, # 1-Deep Learning
-    "11-物理仿真": 37,   # Physical Simulation
-    "12-Survey": None,
+    "1-Computer Architecture and Accelerators": None,
+    "2-Memory and Storage Systems": None,
+    "3-Networking and Interconnects": None,
+    "4-Distributed Systems": None,
+    "5-Compilers and Runtime Systems": None,
+    "6-Performance, Evaluation and Benchmarking": None,
 }
 
 
@@ -211,7 +221,7 @@ def get_all_notes() -> List[Path]:
     notes = []
     for root, dirs, files in os.walk(PAPER_NOTES_ROOT):
         # 跳过概念目录
-        if '_概念' in root:
+        if '_概念' in root or '_concepts' in root:
             continue
         for f in files:
             if f.endswith('.md'):
@@ -313,7 +323,7 @@ def update_frontmatter_collection(filepath: Path, new_collection: str):
 
 
 def get_collection_path(collections: Dict[int, Dict[str, Optional[int]]], collection_id: int) -> str:
-    """获取分类完整路径，如 3-Robotics/1-VLX/VLA"""
+    """获取分类完整路径，如 4-Distributed Systems/Serving"""
     path_parts = []
     current = collection_id
     while current:

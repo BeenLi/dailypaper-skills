@@ -18,7 +18,9 @@ import asyncio
 import json
 import re
 import sys
+import xml.etree.ElementTree as ET
 from collections import Counter
+from urllib.parse import quote
 
 SEMAPHORE_LIMIT = 10
 CURL_TIMEOUT = 30
@@ -211,7 +213,7 @@ def extract_method_names(html: str, paper_title: str) -> list[str]:
     """Extract method/model names from HTML text using CamelCase + ALLCAPS patterns."""
     text = strip_tags(html)
 
-    # CamelCase: DreamerV3, OpenVLA, ControlNet, MuJoCo
+    # CamelCase: FlashInfer, TensorRT, ControlNet, MuJoCo
     camel = re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]*)+(?:V?\d+)?)\b", text)
     # ALLCAPS with optional version: DDPM, SAM-2, GPT-4, RT-2
     allcaps = re.findall(r"\b([A-Z]{2,}(?:[-_]\d+)?)\b", text)
@@ -309,6 +311,246 @@ def extract_from_abs(html: str) -> dict:
     return {"authors": authors, "affiliations": list(affils)}
 
 
+def normalize_title(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def titles_match(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    na = normalize_title(a)
+    nb = normalize_title(b)
+    return na == nb or na in nb or nb in na
+
+
+def summarize_abstract(text: str) -> str:
+    text = re.sub(r"\s+", " ", (text or "")).strip()
+    if len(text) < 80:
+        return ""
+    if len(text) > 500:
+        end = text.rfind(". ", 300, 550)
+        if end > 0:
+            text = text[:end + 1]
+        else:
+            text = text[:500].rsplit(" ", 1)[0] + "..."
+    return text
+
+
+def extract_meta_tags(html: str) -> dict:
+    meta = {}
+    for name, content in re.findall(
+        r'<meta[^>]+(?:name|property)=["\']([^"\']+)["\'][^>]+content=["\']([^"\']+)["\']',
+        html,
+        re.IGNORECASE,
+    ):
+        meta[name.lower()] = content.strip()
+    return meta
+
+
+def extract_doi(value: str) -> str:
+    if not value:
+        return ""
+    match = re.search(r"(10\.\d{4,9}/[-._;()/:A-Z0-9]+)", value, re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+async def search_arxiv_by_title(title: str, sem: asyncio.Semaphore) -> dict:
+    query = quote(f'ti:"{title}"')
+    url = (
+        "https://export.arxiv.org/api/query"
+        f"?search_query={query}&start=0&max_results=5"
+    )
+    xml_text = await curl_fetch(url, sem)
+    if not xml_text:
+        return {}
+
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return {}
+
+    best = {}
+    for entry in root.findall("atom:entry", {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}):
+        title_el = entry.find("atom:title", {"atom": "http://www.w3.org/2005/Atom"})
+        if title_el is None or not titles_match(title, title_el.text or ""):
+            continue
+        summary_el = entry.find("atom:summary", {"atom": "http://www.w3.org/2005/Atom"})
+        published_el = entry.find("atom:published", {"atom": "http://www.w3.org/2005/Atom"})
+        id_el = entry.find("atom:id", {"atom": "http://www.w3.org/2005/Atom"})
+        authors = []
+        affiliations = []
+        for author in entry.findall("atom:author", {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}):
+            name_el = author.find("atom:name", {"atom": "http://www.w3.org/2005/Atom"})
+            if name_el is not None and name_el.text:
+                authors.append(name_el.text.strip())
+            for aff_el in author.findall("arxiv:affiliation", {"arxiv": "http://arxiv.org/schemas/atom"}):
+                if aff_el.text and aff_el.text.strip():
+                    affiliations.append(aff_el.text.strip())
+        arxiv_url = id_el.text.strip() if id_el is not None and id_el.text else ""
+        arxiv_id_match = re.search(r"(\d{4}\.\d{4,5})", arxiv_url)
+        best = {
+            "title": re.sub(r"\s+", " ", title_el.text or "").strip(),
+            "abstract": re.sub(r"\s+", " ", summary_el.text or "").strip() if summary_el is not None else "",
+            "authors": authors,
+            "affiliations": list(dict.fromkeys(affiliations)),
+            "url": arxiv_url,
+            "pdf": f"https://arxiv.org/pdf/{arxiv_id_match.group(1)}" if arxiv_id_match else "",
+            "date": (published_el.text or "")[:10] if published_el is not None else "",
+            "arxiv_id": arxiv_id_match.group(1) if arxiv_id_match else "",
+        }
+        break
+    return best
+
+
+async def fetch_doi_metadata(url_or_doi: str, sem: asyncio.Semaphore) -> dict:
+    doi = extract_doi(url_or_doi)
+    if not doi:
+        return {}
+
+    url = f"https://api.crossref.org/works/{quote(doi, safe='')}"
+    raw = await curl_fetch(url, sem)
+    if not raw:
+        return {}
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+    message = payload.get("message") or {}
+    title_list = message.get("title") or []
+    abstract = message.get("abstract") or ""
+    abstract = re.sub(r"</?jats:[^>]+>", " ", abstract)
+    abstract = re.sub(r"<[^>]+>", " ", abstract)
+    abstract = re.sub(r"\s+", " ", abstract).strip()
+
+    authors = []
+    affiliations = []
+    for author in message.get("author") or []:
+        if not isinstance(author, dict):
+            continue
+        given = (author.get("given") or "").strip()
+        family = (author.get("family") or "").strip()
+        name = " ".join(part for part in (given, family) if part)
+        if name:
+            authors.append(name)
+        for aff in author.get("affiliation") or []:
+            if isinstance(aff, dict) and aff.get("name"):
+                affiliations.append(aff["name"].strip())
+
+    resource = message.get("resource") or {}
+    primary_url = resource.get("primary", {}).get("URL", "") if isinstance(resource, dict) else ""
+
+    return {
+        "doi": doi,
+        "title": title_list[0].strip() if title_list else "",
+        "abstract": abstract,
+        "authors": authors,
+        "affiliations": list(dict.fromkeys(a for a in affiliations if a)),
+        "url": primary_url or f"https://doi.org/{doi}",
+    }
+
+
+async def fetch_doi_landing_metadata(url_or_doi: str, sem: asyncio.Semaphore) -> dict:
+    if not url_or_doi:
+        return {}
+    url = url_or_doi
+    if not url.startswith("http"):
+        url = f"https://doi.org/{url_or_doi}"
+    html = await curl_fetch(url, sem)
+    if not html:
+        return {}
+
+    meta = extract_meta_tags(html)
+    authors = []
+    affiliations = []
+    for content in re.findall(
+        r'<meta[^>]+name=["\']citation_author["\'][^>]+content=["\']([^"\']+)["\']',
+        html,
+        re.IGNORECASE,
+    ):
+        authors.append(content.strip())
+    for content in re.findall(
+        r'<meta[^>]+name=["\']citation_author_institution["\'][^>]+content=["\']([^"\']+)["\']',
+        html,
+        re.IGNORECASE,
+    ):
+        affiliations.append(content.strip())
+
+    return {
+        "title": meta.get("citation_title") or meta.get("og:title") or "",
+        "abstract": meta.get("citation_abstract") or meta.get("description") or meta.get("og:description") or "",
+        "authors": authors,
+        "affiliations": list(dict.fromkeys(a for a in affiliations if a)),
+        "figure_url": meta.get("og:image", ""),
+        "url": meta.get("citation_public_url") or url,
+    }
+
+
+async def search_semantic_scholar_by_title(title: str, sem: asyncio.Semaphore) -> dict:
+    query = quote(title)
+    url = (
+        "https://api.semanticscholar.org/graph/v1/paper/search"
+        f"?query={query}"
+        "&fields=title,abstract,authors,url,venue,externalIds,openAccessPdf,tldr"
+        "&limit=5"
+    )
+    raw = await curl_fetch(url, sem)
+    if not raw:
+        return {}
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+    for item in payload.get("data", []):
+        if not titles_match(title, item.get("title", "")):
+            continue
+        return {
+            "title": item.get("title", ""),
+            "abstract": item.get("abstract", "") or "",
+            "authors": [a.get("name", "").strip() for a in item.get("authors", []) if isinstance(a, dict) and a.get("name")],
+            "url": item.get("url", ""),
+            "venue": item.get("venue", ""),
+            "external_ids": item.get("externalIds", {}) or {},
+            "figure_url": ((item.get("openAccessPdf") or {}).get("url", "")),
+            "tldr": ((item.get("tldr") or {}).get("text", "")),
+        }
+    return {}
+
+
+async def search_semantic_scholar_by_doi(url_or_doi: str, sem: asyncio.Semaphore) -> dict:
+    doi = extract_doi(url_or_doi)
+    if not doi:
+        return {}
+
+    fields = "title,abstract,authors,url,venue,externalIds,openAccessPdf,tldr"
+    url = f"https://api.semanticscholar.org/graph/v1/paper/DOI:{quote(doi, safe='')}"
+    url += f"?fields={fields}"
+    raw = await curl_fetch(url, sem)
+    if not raw:
+        return {}
+
+    try:
+        item = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+    return {
+        "title": item.get("title", ""),
+        "abstract": item.get("abstract", "") or "",
+        "authors": [a.get("name", "").strip() for a in item.get("authors", []) if isinstance(a, dict) and a.get("name")],
+        "url": item.get("url", ""),
+        "venue": item.get("venue", ""),
+        "external_ids": item.get("externalIds", {}) or {},
+        "figure_url": ((item.get("openAccessPdf") or {}).get("url", "")),
+        "tldr": ((item.get("tldr") or {}).get("text", "")),
+    }
+
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PDF affiliation extraction
@@ -359,16 +601,37 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
         url = paper.get("url", "")
         m = re.search(r"(\d{4}\.\d{4,5})", url)
         arxiv_id = m.group(1) if m else ""
-    if not arxiv_id:
-        return paper
-
     title = paper.get("title", "")
     result = dict(paper)  # copy
+    arxiv_match = {}
+    doi_api_metadata = {}
+    doi_metadata = {}
+    semantic_match = {}
 
     try:
+        if title and not arxiv_id:
+            arxiv_match = await search_arxiv_by_title(title, sem)
+            if arxiv_match.get("arxiv_id"):
+                arxiv_id = arxiv_match["arxiv_id"]
+                result["arxiv_id"] = arxiv_id
+                result["url"] = arxiv_match.get("url") or result.get("url", "")
+                result["pdf"] = arxiv_match.get("pdf") or result.get("pdf", "")
+                result["date"] = arxiv_match.get("date") or result.get("date", "")
+
+        if title:
+            if result.get("url") and "doi" in result.get("url", "").lower():
+                doi_api_metadata = await fetch_doi_metadata(result["url"], sem)
+                semantic_match = await search_semantic_scholar_by_doi(result["url"], sem)
+            if result.get("url") and "doi.org" in result.get("url", ""):
+                doi_metadata = await fetch_doi_landing_metadata(result["url"], sem)
+            if not semantic_match:
+                semantic_match = await search_semantic_scholar_by_title(title, sem)
+
         # Fetch HTML page
-        html_url = f"https://arxiv.org/html/{arxiv_id}"
-        html = await curl_fetch(html_url, sem)
+        html = ""
+        if arxiv_id:
+            html_url = f"https://arxiv.org/html/{arxiv_id}"
+            html = await curl_fetch(html_url, sem)
 
         # Parse HTML if we got content
         html_authors = []
@@ -393,7 +656,7 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
         # Abs fallback if HTML authors OR affiliations are empty
         abs_authors = []
         abs_affiliations = []
-        if not html_authors or not html_affiliations:
+        if arxiv_id and (not html_authors or not html_affiliations):
             abs_url = f"https://arxiv.org/abs/{arxiv_id}"
             abs_html = await curl_fetch(abs_url, sem)
             if abs_html:
@@ -403,37 +666,79 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
 
         # PDF fallback for affiliations if still empty
         pdf_affiliations = []
-        if not html_affiliations and not abs_affiliations:
+        if arxiv_id and not html_affiliations and not abs_affiliations:
             pdf_affiliations = await extract_affiliations_pdf(arxiv_id, sem)
 
         # ── Merge with priority rules ──
         # Principle: new extraction > existing input, but never overwrite non-empty with empty
 
         # figure_url: HTML curl > keep existing
-        result["figure_url"] = figure_url or paper.get("figure_url", "")
+        result["figure_url"] = (
+            figure_url
+            or doi_api_metadata.get("figure_url", "")
+            or doi_metadata.get("figure_url", "")
+            or semantic_match.get("figure_url", "")
+            or paper.get("figure_url", "")
+        )
 
-        # affiliations: HTML > abs fallback > PDF fallback > keep existing input
+        # affiliations: HTML > abs fallback > PDF fallback > arxiv search > DOI API > DOI landing > keep existing input
         if html_affiliations:
             result["affiliations"] = ", ".join(html_affiliations)
         elif abs_affiliations:
             result["affiliations"] = ", ".join(abs_affiliations)
         elif pdf_affiliations:
             result["affiliations"] = ", ".join(pdf_affiliations)
+        elif arxiv_match.get("affiliations"):
+            result["affiliations"] = ", ".join(arxiv_match["affiliations"])
+        elif doi_api_metadata.get("affiliations"):
+            result["affiliations"] = ", ".join(doi_api_metadata["affiliations"])
+        elif doi_metadata.get("affiliations"):
+            result["affiliations"] = ", ".join(doi_metadata["affiliations"])
         # else: keep whatever was in the input (supports re-enriching enriched data)
 
-        # authors: HTML > abs fallback > keep existing input
+        # authors: HTML > abs fallback > arxiv search > semantic scholar > DOI API > DOI landing > keep existing input
         if html_authors:
             result["authors"] = ", ".join(html_authors)
         elif abs_authors:
             result["authors"] = ", ".join(abs_authors)
+        elif arxiv_match.get("authors"):
+            result["authors"] = ", ".join(arxiv_match["authors"])
+        elif semantic_match.get("authors"):
+            result["authors"] = ", ".join(semantic_match["authors"])
+        elif doi_api_metadata.get("authors"):
+            result["authors"] = ", ".join(doi_api_metadata["authors"])
+        elif doi_metadata.get("authors"):
+            result["authors"] = ", ".join(doi_metadata["authors"])
         # else: keep original
+
+        # abstract: keep existing > arxiv search > semantic scholar > DOI API > DOI landing
+        if not result.get("abstract"):
+            result["abstract"] = (
+                arxiv_match.get("abstract", "")
+                or semantic_match.get("abstract", "")
+                or doi_api_metadata.get("abstract", "")
+                or doi_metadata.get("abstract", "")
+                or paper.get("abstract", "")
+            )
 
         # Other enriched fields
         result["section_headers"] = section_headers
         result["captions"] = captions
         result["has_real_world"] = has_real_world
-        result["method_names"] = method_names
-        result["method_summary"] = method_summary
+        if not method_names and arxiv_match.get("title"):
+            method_names = extract_method_names(arxiv_match.get("title", ""), title)
+        result["method_names"] = method_names or result.get("method_names", [])
+        result["method_summary"] = (
+            method_summary
+            or semantic_match.get("tldr", "")
+            or summarize_abstract(result.get("abstract", ""))
+        )
+
+        result["doi"] = (
+            doi_api_metadata.get("doi", "")
+            or semantic_match.get("external_ids", {}).get("DOI", "")
+            or result.get("doi", "")
+        )
 
     except Exception as e:
         print(f"  [error] {arxiv_id}: {e}", file=sys.stderr)

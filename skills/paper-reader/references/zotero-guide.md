@@ -29,7 +29,7 @@ WHERE ia.parentItemID = {item_id} AND ia.contentType = 'application/pdf';
 
 ```python
 def get_collection_path(collection_id):
-    """返回完整路径如 '3-Robotics/1-VLX/VLA'"""
+    """返回完整路径如 '4-Distributed Systems/Serving'"""
     cursor.execute("SELECT collectionID, collectionName, parentCollectionID FROM collections")
     collections = {row[0]: {'name': row[1], 'parent': row[2]} for row in cursor.fetchall()}
     path_parts = []
@@ -58,9 +58,9 @@ def get_collection_path(collection_id):
 
 | 论文 | 错误分类 | 正确分类 | 理由 |
 |------|----------|----------|------|
-| 用 Flow Matching 做 VLA | Flow Matching | VLA | 核心是机器人策略 |
-| 用 3DGS 做 SLAM | 3DGS | SLAM | 目标是定位建图 |
-| DepthAnything | Deep Learning | Depth Estimation | 具体任务 |
+| 用 kernel fusion 做 LLM inference | LLM | Runtime Systems | 核心是运行时优化 |
+| 用 RDMA 优化 distributed training | Distributed Training | Networking and Interconnects | 核心瓶颈在通信 |
+| 一个新的 serving benchmark | Distributed Systems | Performance and Benchmarking | 主要贡献是评测体系 |
 
 ## Zotero 分类操作
 
@@ -68,7 +68,7 @@ def get_collection_path(collection_id):
 # 查看论文当前分类
 python3 assets/zotero_helper.py info {item_id}
 # 查找目标分类 ID
-python3 assets/zotero_helper.py find-collection "VLA"
+python3 assets/zotero_helper.py find-collection "Distributed Systems"
 # 移动论文
 python3 assets/zotero_helper.py move {item_id} {new_collection_id} --from {old_collection_id}
 # 添加到多个分类

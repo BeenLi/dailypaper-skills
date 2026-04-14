@@ -9,9 +9,9 @@ Paper Reading Daemon - 后台论文阅读守护进程
 4. 支持断点续传
 
 用法：
-    # 启动守护进程处理 VLA 分类
+    # 启动守护进程处理 systems 分类
     screen -S paper-daemon
-    python3 paper_daemon.py -c "VLA"
+    python3 paper_daemon.py -c "Distributed Systems"
 
     # 查看进度
     python3 paper_daemon.py --status
@@ -553,7 +553,7 @@ $$公式$$
 1. 理解论文的**核心贡献**是什么
 2. 问自己：如果我要找这篇论文，我会去哪个分类找？
 3. 按**主要贡献**分类，而不是使用的技术
-   - 例：用 Diffusion 做机器人控制 → VLA，不是 Diffusion Model
+   - 例：用 Runtime 做 LLM serving → Distributed Systems，不是 Generative Models
    - 例：用 3DGS 做 SLAM → SLAM，不是 3DGS
 
 ### 分类操作

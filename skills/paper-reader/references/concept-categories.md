@@ -6,23 +6,19 @@
 
 | 子目录 | 归类标准 | 示例 |
 |--------|----------|------|
-| `1-生成模型` | 扩散模型、GAN、VAE、Flow、生成相关方法 | DMD, DPM-Solver, SDE, NFE, Score Distillation |
-| `2-强化学习` | RL 算法、策略优化、值函数、reward | Actor-Critic, PPO, MBRL, CRL, DrQv2, DAPG |
-| `3-机器人策略` | 操作策略、抓取、灵巧手、模仿学习、VLA | HOI, DexRep, UniDexGrasp, Diffusion Policy |
-| `4-足式运动` | 四足、双足、locomotion | CPG, Raibert Controller |
-| `5-导航与定位` | SLAM、路径规划、导航 | NAVSIM, VPR |
-| `6-3D视觉` | NeRF、3DGS、点云、深度估计、立体视觉 | Epipolar Geometry, 4DGS |
-| `7-规划与控制` | 控制理论、优化器、MPC、PID | PID, SMC, ILC, OSQP, CVXPY, SNOPT |
-| `8-仿真器` | 仿真平台、物理引擎 | IsaacLab, MuJoCo |
-| `9-无人机` | UAV、飞行控制 | PX4 |
-| `10-数据集` | 数据集、benchmark | ImageNet, YCB, BridgeV2, FFHQ |
-| `11-深度学习基础` | 通用 DL 技术、架构组件、训练技巧 | GMM, EMA, MoE, GAT, Transformer, Teacher Forcing |
-| `12-物理仿真` | 物理模型、生物力学仿真 | OpenSim, SCONE, FEM |
-| `13-机器人硬件` | 传感器、执行器、机器人平台 | Tendon Drive, Tactile Sensor |
-| `14-安全与鲁棒性` | 对抗攻击、安全约束 | CBF, Adversarial |
-| `15-网页智能体` | 网页操作、浏览器自动化 | WebAgent |
-| `16-人体动作` | 人体姿态、动作生成、动捕 | ViTPose, SMPL, Motion Capture |
+| `1-Computer Architecture and Accelerators` | 芯片架构、加速器、微架构、张量核心、映射与放置 | Tensor Core, Systolic Array, Warp Scheduler |
+| `2-Memory and Storage Systems` | cache、HBM、KV cache、memory hierarchy、CXL、存储分层 | KV Cache, HBM3, Page Cache, CXL Memory Pool |
+| `3-Networking and Interconnects` | RDMA、collective、交换机、拓扑、传输协议、互连优化 | RDMA, AllReduce, ECN, NVLink, Clos |
+| `4-Distributed Systems` | 集群调度、容错、多租户、分布式执行、服务系统 | Scheduler, Placement Policy, Checkpointing, vLLM |
+| `5-Compilers and Runtime Systems` | 编译器、中间表示、kernel fusion、runtime、自动调优 | MLIR, TVM, Triton, Kernel Fusion |
+| `6-Performance, Evaluation and Benchmarking` | profiling、trace、benchmark、roofline、测量方法 | Roofline Model, MLPerf, Perf Counter |
 | `0-uncategorized` | **仅在完全无法判断时**才用，应尽量避免 | — |
+
+## 归类原则
+
+- 优先看概念服务的系统层次，而不是论文应用场景。
+- `LLM training / inference / serving` 不单独建一级目录；相关概念按主要落点归到架构、内存、网络、分布式或运行时。
+- 跨层概念优先归到“最直接决定性能瓶颈”的那一层。
 
 ## 概念笔记模板
 
@@ -37,7 +33,7 @@ aliases: [中文别名, 英文别名]
 ## 定义
 {一句话定义}
 
-## 数学形式
+## 数学形式 / 系统模型
 $$公式$$
 
 ## 核心要点

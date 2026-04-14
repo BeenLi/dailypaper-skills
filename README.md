@@ -1,6 +1,6 @@
 # dailypaper-skills
 
-我平时读论文用的一套 Codex skills。直接跟 Codex 说一句话，就能筛论文、读论文、写笔记，最后自动存进 Obsidian。
+我平时读 `computer architecture / networking / distributed systems / LLM systems` 论文用的一套 Codex skills。直接跟 Codex 说一句话，就能筛论文、读论文、写笔记，最后自动存进 Obsidian。
 
 > 📺 [论文流水线效果演示（旧视频）](http://xhslink.com/o/1dhQCn40EWY) — 展示的是同一套工作流的早期版本
 
@@ -44,8 +44,8 @@ ObsidianVault/
 快速看一下这篇论文 https://arxiv.org/abs/2509.24527
 批判性分析这篇论文 ~/Downloads/paper.pdf
 
-读一下 Zotero 里的 Diffusion Policy
-批量读一下 Zotero 里 VLA 分类下的论文
+读一下 Zotero 里的 vLLM
+批量读一下 Zotero 里 Distributed Systems 分类下的论文
 ```
 
 `今日论文推荐` 会跑完整流程，`读一下这篇论文 ...` 用来读单篇。
@@ -114,11 +114,11 @@ mkdir -p "$VAULT/DailyPapers" \
 
 **每日推荐**拆成三步流水线，避免单次上下文太长：
 
-1. **抓取**：Python 脚本并发请求 HuggingFace Daily / Trending + arXiv API，按你配的关键词打分、去重，输出 top 30 候选到 `/tmp`。然后异步抓 arXiv 页面补全作者、机构、图片等元数据。
+1. **抓取**：Python 脚本优先抓取 DBLP proceedings / journal pages、最近会议 program pages，再补 arXiv API；按你配的 systems 关键词打分、去重，输出 top 30 候选到 `/tmp`。然后异步抓 arXiv 页面补全作者、机构、图片等元数据。
 2. **点评**：Codex 读候选列表，按 必读 / 值得看 / 可跳过 分流，写锐评，保存到 Obsidian 的 `DailyPapers/` 目录，同时更新 `.history.json` 做跨天去重。
 3. **笔记**：对"必读"论文逐篇调 paper-reader 生成完整笔记（公式、图表、关键方法），顺便补概念库，最后回填链接、刷新目录页。
 
-**读单篇**走 paper-reader：支持 arXiv 链接、本地 PDF、Zotero 搜索。会从 arXiv HTML / 项目主页 / PDF 多路取图，按模板生成结构化笔记，自动归类到 Obsidian 对应目录。
+**读单篇**走 paper-reader：支持 arXiv 链接、本地 PDF、Zotero 搜索。会从 arXiv HTML / 项目主页 / PDF 多路取图，按模板生成结构化笔记，自动归类到 `Architecture / Memory / Networking / Distributed / Runtime / Benchmarking` 等目录。
 
 **目录页**由 `generate-mocs` 维护：递归扫描论文笔记和概念库目录，自动生成带 wikilink 的索引页。
 

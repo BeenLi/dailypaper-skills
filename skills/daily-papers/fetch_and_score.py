@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-fetch_and_score.py — Phase 1+2: Fetch, score, merge, dedup, select top 30.
-
-Replaces the LLM orchestration step with pure Python. Zero token cost.
+fetch_and_score.py — Phase 1+2: fetch, score, dedup, and select top papers.
 
 Usage:
     python3 fetch_and_score.py > /tmp/daily_papers_top30.json
     python3 fetch_and_score.py --date 2026-02-25 > /tmp/daily_papers_top30.json
     python3 fetch_and_score.py --days 7 > /tmp/daily_papers_top30.json
 
-Stderr: progress logs.  Stdout: JSON array of top papers (30 * days).
+Stderr: progress logs. Stdout: JSON array of selected papers.
 """
 
 import argparse
@@ -18,8 +16,9 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
+from html import unescape
 from pathlib import Path
-from urllib.error import URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 _SHARED_DIR = Path(__file__).resolve().parent.parent / "_shared"
@@ -28,7 +27,6 @@ if str(_SHARED_DIR) not in sys.path:
 
 from user_config import daily_papers_config, daily_papers_dir
 
-# ── Configuration ──────────────────────────────────────────────────────────
 
 _CONFIG = daily_papers_config()
 
@@ -47,179 +45,328 @@ ATOM_NS = {
     "arxiv": "http://arxiv.org/schemas/atom",
 }
 
-# ── Scoring ────────────────────────────────────────────────────────────────
+VENUE_SPECS = [
+    {"slug": "isca", "name": "ISCA", "dblp_path": "conf/isca/isca{year}.html", "program_url": "https://iscaconf.org/isca{year}/program/"},
+    {"slug": "micro", "name": "MICRO", "dblp_path": "conf/micro/micro{year}.html", "program_url": "https://microarch.org/micro{yy}/program.php"},
+    {"slug": "hpca", "name": "HPCA", "dblp_path": "conf/hpca/hpca{year}.html", "program_url": "https://hpca-conf.org/{year}/program/"},
+    {"slug": "asplos", "name": "ASPLOS", "dblp_path": "conf/asplos/asplos{year}.html", "program_url": "https://www.asplos-conference.org/asplos{year}/program/"},
+    {"slug": "sigcomm", "name": "SIGCOMM", "dblp_path": "conf/sigcomm/sigcomm{year}.html", "program_url": "https://conferences.sigcomm.org/sigcomm/{year}/program/"},
+    {"slug": "nsdi", "name": "NSDI", "dblp_path": "conf/nsdi/nsdi{year}.html", "program_url": "https://www.usenix.org/conference/nsdi{yy}/technical-sessions"},
+    {"slug": "osdi", "name": "OSDI", "dblp_path": "conf/osdi/osdi{year}.html", "program_url": "https://www.usenix.org/conference/osdi{yy}/technical-sessions"},
+    {"slug": "atc", "name": "USENIX ATC", "dblp_path": "conf/usenix/usenix{year}.html", "program_url": "https://www.usenix.org/conference/atc{yy}/technical-sessions"},
+    {"slug": "eurosys", "name": "EuroSys", "dblp_path": "conf/eurosys/eurosys{year}.html", "program_url": "https://{year}.eurosys.org/program/"},
+    {"slug": "sc", "name": "SC", "dblp_path": "conf/sc/sc{year}.html", "program_url": ""},
+    {"slug": "mlsys", "name": "MLSys", "dblp_path": "", "program_url": ""},
+]
+
+JOURNAL_SPECS = [
+    {"slug": "tpds", "name": "IEEE TPDS", "dblp_path": "journals/tpds/tpds{volume}.html", "base_year": 1990, "base_volume": 1},
+    {"slug": "ton", "name": "IEEE/ACM ToN", "dblp_path": "journals/ton/ton{volume}.html", "base_year": 1993, "base_volume": 1},
+]
 
 
-def score_paper(paper: dict, is_trending: bool = False) -> int:
-    text = (paper["title"] + " " + paper["abstract"]).lower()
-    title_lower = paper["title"].lower()
+def strip_tags(text: str) -> str:
+    return re.sub(r"<[^>]+>", "", text)
 
-    # 1. Negative keywords → instant reject
+
+def normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", unescape(text or "")).strip()
+
+
+def score_paper(paper: dict) -> int:
+    text = (paper.get("title", "") + " " + paper.get("abstract", "")).lower()
+    title_lower = paper.get("title", "").lower()
+    venue_text = (paper.get("venue", "") + " " + paper.get("source", "")).lower()
+
     for neg in NEGATIVE_KEYWORDS:
         if neg in text:
             return -999
 
     score = 0
-
-    # 2. Positive keywords
     keyword_hits = 0
     for kw in KEYWORDS:
-        if kw in title_lower:
+        kw_lower = kw.lower()
+        if kw_lower in title_lower:
             score += 3
             keyword_hits += 1
-        elif kw in text:
+        elif kw_lower in text:
             score += 1
             keyword_hits += 1
 
-    # 3. Domain boost
-    domain_hits = sum(1 for kw in DOMAIN_BOOST_KEYWORDS if kw in text)
-    if domain_hits >= 2:
+    domain_hits = sum(1 for kw in DOMAIN_BOOST_KEYWORDS if kw.lower() in text)
+    if domain_hits >= 4:
+        score += 4
+    elif domain_hits >= 2:
         score += 2
     elif domain_hits == 1:
         score += 1
 
-    # 4. Trending boost (HF sources only)
-    #    GATE: only apply if paper has at least 1 keyword or domain match,
-    #    to prevent irrelevant but popular papers from flooding the list
-    has_relevance = keyword_hits > 0 or domain_hits > 0
-    if is_trending:
-        upvotes = paper.get("hf_upvotes", 0) or 0
-        if has_relevance:
-            # Relevant + trending → full boost
-            if upvotes >= 10:
-                score += 3
-            elif upvotes >= 5:
-                score += 2
-            elif upvotes >= 2:
-                score += 1
-        else:
-            # No relevance → minimal boost (only very popular papers get a chance)
-            if upvotes >= 20:
-                score += 1
+    venue_hits = sum(1 for spec in VENUE_SPECS if spec["slug"] in venue_text or spec["name"].lower() in venue_text)
+    if venue_hits:
+        score += 2
+
+    systems_phrases = [
+        "serving system",
+        "runtime system",
+        "distributed inference",
+        "distributed training",
+        "cluster scheduling",
+        "memory hierarchy",
+        "network stack",
+        "datacenter network",
+        "collective communication",
+    ]
+    score += sum(1 for phrase in systems_phrases if phrase in text)
 
     return score
 
 
-# ── Fetchers ───────────────────────────────────────────────────────────────
-
-
 def fetch_url(url: str, timeout: int = 30) -> str:
     try:
-        req = Request(url, headers={"User-Agent": "daily-papers-bot/1.0"})
+        req = Request(url, headers={"User-Agent": "daily-papers-bot/2.0"})
         with urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8")
-    except Exception as e:
-        print(f"  [WARN] fetch failed {url}: {e}", file=sys.stderr)
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        print(f"  [WARN] fetch failed {url}: {exc}", file=sys.stderr)
         return ""
 
 
-def _parse_hf_item(item: dict, source: str) -> tuple[str, dict] | None:
-    """Parse a single HF API item into (arxiv_id, paper_dict). Returns None on skip."""
-    p = item.get("paper", {})
-    arxiv_id = p.get("id", "")
-    if not arxiv_id:
-        return None
-
-    upvotes = p.get("upvotes", 0)
-
-    # Authors
-    authors_raw = p.get("authors", [])
-    if isinstance(authors_raw, list):
-        names = []
-        for a in authors_raw:
-            if isinstance(a, dict):
-                names.append(a.get("name", ""))
-            elif isinstance(a, str):
-                names.append(a)
-        authors = ", ".join(n for n in names if n)
-    else:
-        authors = str(authors_raw)
-
+def make_base_paper(title: str, authors: str = "", abstract: str = "", url: str = "", **extra) -> dict:
     paper = {
-        "title": p.get("title", ""),
+        "title": title,
         "authors": authors,
         "affiliations": "",
-        "abstract": p.get("summary", ""),
-        "url": f"https://arxiv.org/abs/{arxiv_id}",
-        "pdf": f"https://arxiv.org/pdf/{arxiv_id}",
-        "date": (p.get("publishedAt") or "")[:10],
+        "abstract": abstract,
+        "url": url,
+        "pdf": extra.pop("pdf", ""),
+        "date": extra.pop("date", ""),
         "score": 0,
-        "category": "",
-        "source": source,
-        "hf_upvotes": upvotes,
+        "category": extra.pop("category", ""),
+        "source": extra.pop("source", ""),
+        "venue": extra.pop("venue", ""),
     }
-
-    is_trending = source == "hf-trending"
-    paper["score"] = score_paper(paper, is_trending=is_trending)
-
-    if paper["score"] < 0:
-        return None
-
-    return arxiv_id, paper
+    paper.update(extra)
+    return paper
 
 
-def fetch_hf_papers(start_date=None, end_date=None) -> list[dict]:
-    papers = {}  # arxiv_id → paper
+def venue_label(spec: dict, year: int) -> str:
+    return f"{spec['name']} {year}"
 
-    # ── hf-daily: loop each day in range ──
-    if start_date and end_date:
-        d = start_date
-        while d <= end_date:
-            date_str = d.isoformat()
-            endpoint = f"https://huggingface.co/api/daily_papers?date={date_str}&limit=100"
-            print(f"  Fetching hf-daily {date_str}...", file=sys.stderr)
-            raw = fetch_url(endpoint)
-            if raw:
-                try:
-                    items = json.loads(raw)
-                except json.JSONDecodeError:
-                    items = []
-                    print(f"  [WARN] bad JSON from hf-daily {date_str}", file=sys.stderr)
-                for item in items:
-                    result = _parse_hf_item(item, "hf-daily")
-                    if result:
-                        arxiv_id, paper = result
-                        if arxiv_id not in papers or paper["score"] > papers[arxiv_id]["score"]:
-                            papers[arxiv_id] = paper
-            d += timedelta(days=1)
-    else:
-        # Legacy single-call (days=1 default)
-        endpoint = "https://huggingface.co/api/daily_papers?limit=50"
-        print(f"  Fetching hf-daily...", file=sys.stderr)
-        raw = fetch_url(endpoint)
-        if raw:
-            try:
-                items = json.loads(raw)
-            except json.JSONDecodeError:
-                items = []
-                print(f"  [WARN] bad JSON from hf-daily", file=sys.stderr)
-            for item in items:
-                result = _parse_hf_item(item, "hf-daily")
-                if result:
-                    arxiv_id, paper = result
-                    if arxiv_id not in papers or paper["score"] > papers[arxiv_id]["score"]:
-                        papers[arxiv_id] = paper
 
-    # ── hf-trending: always single call (not date-dependent) ──
-    endpoint = "https://huggingface.co/api/daily_papers?sort=trending&limit=50"
-    print(f"  Fetching hf-trending...", file=sys.stderr)
-    raw = fetch_url(endpoint)
-    if raw:
-        try:
-            items = json.loads(raw)
-        except json.JSONDecodeError:
-            items = []
-            print(f"  [WARN] bad JSON from hf-trending", file=sys.stderr)
-        for item in items:
-            result = _parse_hf_item(item, "hf-trending")
-            if result:
-                arxiv_id, paper = result
-                if arxiv_id not in papers or paper["score"] > papers[arxiv_id]["score"]:
-                    papers[arxiv_id] = paper
+def display_venue_name(venue: str) -> str:
+    normalized = venue.lower()
+    names = {
+        "eurosys": "EuroSys",
+        "sigcomm": "SIGCOMM",
+        "isca": "ISCA",
+        "micro": "MICRO",
+        "hpca": "HPCA",
+        "asplos": "ASPLOS",
+        "nsdi": "NSDI",
+        "osdi": "OSDI",
+        "atc": "USENIX ATC",
+        "sc": "SC",
+        "mlsys": "MLSys",
+    }
+    return names.get(normalized, venue)
 
-    result = list(papers.values())
-    print(f"  HF: {len(result)} papers after scoring", file=sys.stderr)
-    return result
+
+def extract_program_titles(html: str) -> list[str]:
+    candidates = []
+    for pattern in (
+        r"<h[1-4][^>]*>(.*?)</h[1-4]>",
+        r"<strong[^>]*>(.*?)</strong>",
+        r"<span[^>]*class=[\"'][^\"']*title[^\"']*[\"'][^>]*>(.*?)</span>",
+    ):
+        for match in re.finditer(pattern, html, re.DOTALL | re.IGNORECASE):
+            title = normalize_whitespace(strip_tags(match.group(1)))
+            if len(title) < 20 or len(title) > 220:
+                continue
+            if re.match(r"^(session|keynote|break|poster session|coffee break|panel)\b", title, re.IGNORECASE):
+                continue
+            if not re.search(r"[A-Za-z]{4,}", title):
+                continue
+            if title not in candidates:
+                candidates.append(title)
+    return candidates
+
+
+def parse_dblp_proceedings_html(html: str, venue: str, year: int) -> list[dict]:
+    entries = []
+    for match in re.finditer(r"(<li class=\"entry [^\"]*?\".*?)(?=<li class=\"entry |\Z)", html, re.DOTALL):
+        block = match.group(1)
+        title_match = re.search(r"<span class=\"title\"[^>]*>(.*?)</span>", block, re.DOTALL)
+        if not title_match:
+            continue
+
+        title = normalize_whitespace(strip_tags(title_match.group(1)))
+        tail = block[title_match.end():title_match.end() + 8]
+        if tail.lstrip().startswith(".") and not title.endswith("."):
+            title += "."
+        if not title:
+            continue
+
+        authors = [
+            normalize_whitespace(strip_tags(author))
+            for author in re.findall(r"<span itemprop=\"author\"[^>]*>(.*?)</span>", block, re.DOTALL)
+        ]
+        links = re.findall(r"<a href=\"([^\"]+)\"", block)
+        url = next((link for link in links if "doi.org" in link or "arxiv.org" in link), "")
+
+        entries.append(
+            make_base_paper(
+                title=title,
+                authors=", ".join(author for author in authors if author),
+                url=url,
+                source="dblp",
+                venue=f"{display_venue_name(venue)} {year}",
+                date=f"{year}-01-01",
+            )
+        )
+
+    return entries
+
+
+def parse_journal_html(html: str, journal_name: str, year: int) -> list[dict]:
+    entries = []
+    for paper in parse_dblp_proceedings_html(html, venue=journal_name, year=year):
+        paper["source"] = "dblp-journal"
+        paper["venue"] = journal_name
+        entries.append(paper)
+    return entries
+
+
+def fetch_dblp_papers(target_date, years_back: int = 2) -> list[dict]:
+    papers = []
+    seen_titles = set()
+    current_year = target_date.year
+
+    for spec in VENUE_SPECS:
+        if not spec["dblp_path"]:
+            continue
+        for year in range(current_year, current_year - years_back, -1):
+            url = f"https://dblp.org/db/{spec['dblp_path'].format(year=year)}"
+            print(f"  Fetching DBLP {spec['name']} {year}...", file=sys.stderr)
+            html = fetch_url(url, timeout=30)
+            if not html:
+                continue
+            parsed = parse_dblp_proceedings_html(html, venue=spec["name"], year=year)
+            for paper in parsed:
+                title_key = paper["title"].lower()
+                if title_key in seen_titles:
+                    continue
+                paper["score"] = score_paper(paper)
+                if paper["score"] >= MIN_SCORE:
+                    seen_titles.add(title_key)
+                    papers.append(paper)
+
+    for spec in JOURNAL_SPECS:
+        for year in range(current_year, current_year - years_back, -1):
+            volume = spec["base_volume"] + (year - spec["base_year"])
+            url = f"https://dblp.org/db/{spec['dblp_path'].format(volume=volume)}"
+            print(f"  Fetching DBLP {spec['name']} volume {volume}...", file=sys.stderr)
+            html = fetch_url(url, timeout=30)
+            if not html:
+                continue
+            for paper in parse_journal_html(html, journal_name=spec["name"], year=year):
+                title_key = paper["title"].lower()
+                if title_key in seen_titles:
+                    continue
+                paper["score"] = score_paper(paper)
+                if paper["score"] >= MIN_SCORE:
+                    seen_titles.add(title_key)
+                    papers.append(paper)
+
+    print(f"  DBLP: {len(papers)} papers after scoring", file=sys.stderr)
+    return papers
+
+
+def fetch_conference_program_papers(target_date) -> list[dict]:
+    now = datetime.now().date()
+    if (now - target_date).days > 56:
+        return []
+
+    papers = []
+    seen_titles = set()
+    year = target_date.year
+    yy = str(year)[-2:]
+
+    for spec in VENUE_SPECS:
+        if not spec["program_url"]:
+            continue
+        url = spec["program_url"].format(year=year, yy=yy)
+        print(f"  Fetching program page {spec['name']} {year}...", file=sys.stderr)
+        html = fetch_url(url, timeout=20)
+        if not html:
+            continue
+        for title in extract_program_titles(html):
+            title_key = title.lower()
+            if title_key in seen_titles:
+                continue
+            paper = make_base_paper(
+                title=title,
+                url=url,
+                source="conference-program",
+                venue=venue_label(spec, year),
+                date=f"{year}-01-01",
+            )
+            paper["score"] = score_paper(paper)
+            if paper["score"] >= MIN_SCORE:
+                seen_titles.add(title_key)
+                papers.append(paper)
+
+    print(f"  Program pages: {len(papers)} papers after scoring", file=sys.stderr)
+    return papers
+
+
+def fetch_semantic_scholar_papers(target_date, days: int = 1) -> list[dict]:
+    query = quote("LLM serving OR GPU cluster OR RDMA OR accelerator OR distributed systems")
+    limit = min(30 * days, 100)
+    url = (
+        "https://api.semanticscholar.org/graph/v1/paper/search"
+        f"?query={query}&fields=title,abstract,authors,year,venue,url,externalIds&limit={limit}"
+    )
+    print("  Fetching Semantic Scholar fallback...", file=sys.stderr)
+    raw = fetch_url(url, timeout=30)
+    if not raw:
+        return []
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        print("  [WARN] bad JSON from Semantic Scholar", file=sys.stderr)
+        return []
+
+    papers = []
+    current_year = target_date.year
+    for item in payload.get("data", []):
+        year = item.get("year")
+        if year and year < current_year - 2:
+            continue
+        authors = ", ".join(
+            author.get("name", "").strip()
+            for author in item.get("authors", [])
+            if isinstance(author, dict) and author.get("name")
+        )
+        external_ids = item.get("externalIds") or {}
+        arxiv_id = external_ids.get("ArXiv", "")
+        url = item.get("url", "")
+        paper = make_base_paper(
+            title=item.get("title", ""),
+            authors=authors,
+            abstract=item.get("abstract", "") or "",
+            url=url,
+            pdf=f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else "",
+            source="semantic-scholar",
+            venue=item.get("venue", "") or "Semantic Scholar",
+            date=f"{year}-01-01" if year else "",
+        )
+        paper["score"] = score_paper(paper)
+        if paper["score"] >= MIN_SCORE:
+            papers.append(paper)
+
+    print(f"  Semantic Scholar: {len(papers)} papers after scoring", file=sys.stderr)
+    return papers
 
 
 def fetch_arxiv_papers(start_date=None, end_date=None, days: int = 1) -> list[dict]:
@@ -239,8 +386,8 @@ def fetch_arxiv_papers(start_date=None, end_date=None, days: int = 1) -> list[di
 
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
-        print(f"  [WARN] arXiv XML parse error: {e}", file=sys.stderr)
+    except ET.ParseError as exc:
+        print(f"  [WARN] arXiv XML parse error: {exc}", file=sys.stderr)
         return []
 
     papers = []
@@ -254,14 +401,11 @@ def fetch_arxiv_papers(start_date=None, end_date=None, days: int = 1) -> list[di
         if title_el is None or summary_el is None:
             continue
 
-        title = " ".join(title_el.text.split())
-        abstract = " ".join(summary_el.text.split())
-        entry_url = id_el.text.strip() if id_el is not None else ""
-        date = published_el.text[:10] if published_el is not None else ""
-        arxiv_id = entry_url.split("/abs/")[-1] if "/abs/" in entry_url else ""
+        title = normalize_whitespace(title_el.text or "")
+        abstract = normalize_whitespace(summary_el.text or "")
+        entry_url = (id_el.text or "").strip() if id_el is not None else ""
+        date = (published_el.text or "")[:10] if published_el is not None else ""
 
-        # Date filter: only apply in multi-day mode (days > 1)
-        # In single-day mode, arXiv batches span 2-3 days, so filtering would be too strict
         if days > 1 and start_date and end_date and date:
             try:
                 pub_date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -269,54 +413,55 @@ def fetch_arxiv_papers(start_date=None, end_date=None, days: int = 1) -> list[di
                     filtered_by_date += 1
                     continue
             except ValueError:
-                pass  # keep papers with unparseable dates
+                pass
 
         author_els = entry.findall("atom:author", ATOM_NS)
         names = []
         affiliations = set()
-        for a in author_els:
-            name_el = a.find("atom:name", ATOM_NS)
+        for author in author_els:
+            name_el = author.find("atom:name", ATOM_NS)
             if name_el is not None and name_el.text:
                 names.append(name_el.text.strip())
-            for aff_el in a.findall("arxiv:affiliation", ATOM_NS):
+            for aff_el in author.findall("arxiv:affiliation", ATOM_NS):
                 if aff_el.text and aff_el.text.strip():
                     affiliations.add(aff_el.text.strip())
 
         cat_el = entry.find("arxiv:primary_category", ATOM_NS)
         category = cat_el.get("term", "") if cat_el is not None else ""
-
-        papers.append({
-            "title": title,
-            "authors": ", ".join(names),
-            "affiliations": ", ".join(sorted(affiliations)) if affiliations else "",
-            "abstract": abstract,
-            "url": entry_url,
-            "pdf": f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else "",
-            "date": date,
-            "score": 0,
-            "category": category,
-            "source": "arxiv",
-        })
-
-    scored = []
-    for p in papers:
-        p["score"] = score_paper(p)
-        if p["score"] >= 0:
-            scored.append(p)
+        arxiv_id = entry_url.split("/abs/")[-1] if "/abs/" in entry_url else ""
+        paper = make_base_paper(
+            title=title,
+            authors=", ".join(names),
+            abstract=abstract,
+            url=entry_url,
+            pdf=f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else "",
+            date=date,
+            category=category,
+            source="arxiv",
+            venue="arXiv",
+            affiliations=", ".join(sorted(affiliations)) if affiliations else "",
+        )
+        paper["score"] = score_paper(paper)
+        if paper["score"] >= 0:
+            papers.append(paper)
 
     print(
-        f"  arXiv: {len(scored)} papers after scoring (from {len(papers)} parsed, {filtered_by_date} filtered by date)",
+        f"  arXiv: {len(papers)} papers after scoring (from {len(root.findall('atom:entry', ATOM_NS))} parsed, {filtered_by_date} filtered by date)",
         file=sys.stderr,
     )
-    return scored
-
-
-# ── Merge & Dedup ──────────────────────────────────────────────────────────
+    return papers
 
 
 def extract_arxiv_id(url: str) -> str:
-    m = re.search(r"(\d{4}\.\d{4,5})", url)
-    return m.group(1) if m else ""
+    match = re.search(r"(\d{4}\.\d{4,5})", url)
+    return match.group(1) if match else ""
+
+
+def dedup_key(paper: dict) -> str:
+    arxiv_id = extract_arxiv_id(paper.get("url", ""))
+    if arxiv_id:
+        return f"arxiv:{arxiv_id}"
+    return f"title:{paper.get('title', '').strip().lower()}"
 
 
 def load_history() -> list[dict]:
@@ -329,110 +474,85 @@ def load_history() -> list[dict]:
 
 
 def load_fallback_ids(days: int = 7) -> set[str]:
-    ids: set[str] = set()
+    ids = set()
     today = datetime.now().date()
-    for d in range(1, days + 1):
-        fpath = DAILYPAPERS_DIR / f"{(today - timedelta(days=d)).isoformat()}-论文推荐.md"
-        if fpath.exists():
-            try:
-                text = fpath.read_text()
-                for m in re.finditer(r"arxiv\.org/abs/(\d{4}\.\d{4,5})", text):
-                    ids.add(m.group(1))
-            except IOError:
-                pass
+    for offset in range(1, days + 1):
+        fpath = DAILYPAPERS_DIR / f"{(today - timedelta(days=offset)).isoformat()}-论文推荐.md"
+        if not fpath.exists():
+            continue
+        try:
+            text = fpath.read_text()
+        except IOError:
+            continue
+        for match in re.finditer(r"arxiv\.org/abs/(\d{4}\.\d{4,5})", text):
+            ids.add(match.group(1))
     return ids
 
 
-def merge_and_dedup(
-    hf_papers: list[dict],
-    arxiv_papers: list[dict],
-    target_date,
-    days: int = 1,
-    top_n: int = TOP_N,
-) -> list[dict]:
-    is_weekend = target_date.weekday() >= 5
+def merge_and_dedup(primary_papers: list[dict], arxiv_papers: list[dict], target_date, days: int = 1, top_n: int = TOP_N) -> list[dict]:
+    by_key = {}
+    for paper in primary_papers + arxiv_papers:
+        key = dedup_key(paper)
+        if key not in by_key or paper["score"] > by_key[key]["score"]:
+            by_key[key] = paper
 
-    # ── merge by arXiv ID, keep higher score ──
-    by_id: dict[str, dict] = {}
-    for p in hf_papers + arxiv_papers:
-        aid = extract_arxiv_id(p["url"])
-        if not aid:
-            continue
-        if aid not in by_id or p["score"] > by_id[aid]["score"]:
-            by_id[aid] = p
-
-    print(f"  Merged: {len(by_id)} unique papers", file=sys.stderr)
+    print(f"  Merged: {len(by_key)} unique papers", file=sys.stderr)
 
     if days > 1:
-        # ── multi-day mode: skip history dedup ──
-        # User explicitly wants to see all N days, don't filter out previously recommended
-        print(f"  Multi-day mode (days={days}): skipping history dedup", file=sys.stderr)
-        candidates = [p for p in by_id.values() if p["score"] >= MIN_SCORE]
-        candidates.sort(key=lambda x: x["score"], reverse=True)
+        candidates = [paper for paper in by_key.values() if paper["score"] >= MIN_SCORE]
+        candidates.sort(key=lambda item: item["score"], reverse=True)
         top = candidates[:top_n]
-        print(f"  Final: {len(top)} papers (top_n={top_n})", file=sys.stderr)
+        print(f"  Multi-day mode: {len(top)} papers", file=sys.stderr)
         return top
 
-    # ── single-day mode: history dedup as before ──
     history = load_history()
-    history_ids: dict[str, str] = {}  # id → earliest date
-    for h in history:
-        hid, hdate = h.get("id", ""), h.get("date", "")
-        if hid and hdate:
-            if hid not in history_ids or hdate < history_ids[hid]:
-                history_ids[hid] = hdate
+    history_ids = {}
+    for item in history:
+        paper_id = item.get("id", "")
+        paper_date = item.get("date", "")
+        if paper_id and paper_date:
+            if paper_id not in history_ids or paper_date < history_ids[paper_id]:
+                history_ids[paper_id] = paper_date
 
     if len(history) < 10:
-        for fid in load_fallback_ids():
-            history_ids.setdefault(fid, "unknown")
+        for paper_id in load_fallback_ids():
+            history_ids.setdefault(paper_id, "unknown")
 
-    # ── cross-day dedup ──
-    deduped: dict[str, dict] = {}
+    deduped = {}
     removed = 0
-    for aid, p in by_id.items():
-        if aid in history_ids:
-            # Weekend: keep trending with upvotes >= 5
-            if is_weekend and p.get("source") == "hf-trending" and (p.get("hf_upvotes") or 0) >= 5:
-                p["is_re_recommend"] = True
-                p["last_recommend_date"] = history_ids[aid]
-                deduped[aid] = p
-            else:
-                removed += 1
-        else:
-            deduped[aid] = p
-
-    # Mark any remaining that appear in history
-    for aid, p in deduped.items():
-        if aid in history_ids and not p.get("is_re_recommend"):
-            p["is_re_recommend"] = True
-            p["last_recommend_date"] = history_ids[aid]
+    for key, paper in by_key.items():
+        paper_id = extract_arxiv_id(paper.get("url", ""))
+        if paper_id and paper_id in history_ids:
+            removed += 1
+            continue
+        deduped[key] = paper
 
     print(f"  After history dedup: {len(deduped)} (removed {removed})", file=sys.stderr)
 
-    # ── filter + sort ──
-    candidates = [p for p in deduped.values() if p["score"] >= MIN_SCORE]
-    candidates.sort(key=lambda x: x["score"], reverse=True)
+    candidates = [paper for paper in deduped.values() if paper["score"] >= MIN_SCORE]
+    candidates.sort(key=lambda item: item["score"], reverse=True)
 
-    # Back-fill from history if pool is thin
     if len(candidates) < 20 and removed > 0:
         backfill = []
-        for aid, p in by_id.items():
-            if aid not in deduped and p["score"] >= MIN_SCORE:
-                p["is_re_recommend"] = True
-                p["last_recommend_date"] = history_ids.get(aid, "unknown")
-                backfill.append(p)
-        backfill.sort(key=lambda x: x["score"], reverse=True)
+        for paper in by_key.values():
+            paper_id = extract_arxiv_id(paper.get("url", ""))
+            if not paper_id or paper_id not in history_ids:
+                continue
+            if paper["score"] < MIN_SCORE:
+                continue
+            paper = dict(paper)
+            paper["is_re_recommend"] = True
+            paper["last_recommend_date"] = history_ids.get(paper_id, "unknown")
+            backfill.append(paper)
+        backfill.sort(key=lambda item: item["score"], reverse=True)
         needed = 20 - len(candidates)
         candidates.extend(backfill[:needed])
-        if backfill[:needed]:
+        if needed > 0 and backfill:
             print(f"  Back-filled {min(needed, len(backfill))} from history", file=sys.stderr)
 
     top = candidates[:top_n]
     print(f"  Final: {len(top)} papers", file=sys.stderr)
     return top
-
-
-# ── Main ───────────────────────────────────────────────────────────────────
 
 
 def main():
@@ -450,19 +570,26 @@ def main():
     start_date = target_date - timedelta(days=days - 1)
     top_n = TOP_N * days
 
-    is_weekend = target_date.weekday() >= 5
     print(
-        f"[fetch_and_score] {target_date} ({'weekend' if is_weekend else 'weekday'})"
+        f"[fetch_and_score] {target_date}"
         + (f", days={days} [{start_date} ~ {target_date}], top_n={top_n}" if days > 1 else ""),
         file=sys.stderr,
     )
 
-    hf_papers = fetch_hf_papers(start_date, target_date)
+    primary_papers = fetch_dblp_papers(target_date)
+    if not primary_papers:
+        primary_papers = fetch_conference_program_papers(target_date)
+
     arxiv_papers = fetch_arxiv_papers(start_date, target_date, days)
-    top = merge_and_dedup(hf_papers, arxiv_papers, target_date, days=days, top_n=top_n)
+
+    if len(primary_papers) + len(arxiv_papers) < 20:
+        semantic_scholar_papers = fetch_semantic_scholar_papers(target_date, days=days)
+        primary_papers.extend(semantic_scholar_papers)
+
+    top = merge_and_dedup(primary_papers, arxiv_papers, target_date, days=days, top_n=top_n)
 
     json.dump(top, sys.stdout, ensure_ascii=False, indent=2)
-    print(file=sys.stdout)  # trailing newline
+    print(file=sys.stdout)
 
 
 if __name__ == "__main__":
