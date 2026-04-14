@@ -83,9 +83,10 @@ Codex 以"毒舌但有料的资深研究员"角色点评每篇论文：
 
 硬性约束：
 
-- 不能凭空说"只有仿真"——必须检查 `has_real_world` 字段
+- 不能凭空说"有真实硬件/端到端/真实 trace"——必须检查 `has_hardware_eval`、`has_end_to_end_eval`、`has_real_workload` 字段
 - 不能说某篇是"山寨"——除非有具体方法论证据
 - 不确定的信息必须注明"摘要未提及"
+- 主推排序不能只看 `score`：没有 `has_hardware_eval` 的论文默认不进主推；没有 `has_end_to_end_eval` 的 serving 论文只能做备选；同分时优先 `has_real_workload`
 
 ### 2.3 保存
 

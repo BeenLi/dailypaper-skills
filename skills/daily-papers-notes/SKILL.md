@@ -49,7 +49,7 @@ description: |
 
 **1a: 提取概念列表**
 1. 扫描今天的推荐文件，提取所有 `[[...]]` 链接
-2. 额外从 `/tmp/daily_papers_enriched.json` 的 `method_names` 列表中提取所有方法名
+2. 额外从 `/tmp/daily_papers_enriched.json` 的 `method_name` 和 `method_names` 中提取系统名 / 方法名
 3. 合并去重
 
 **1b: 过滤**
@@ -114,7 +114,7 @@ description: |
 
 1. 从论文标题中提取方法名/模型名（通常是标题冒号前的缩写，如 "DM0"、"BPP"、"PA3FF"）
 2. 与 3a 的笔记索引匹配（不区分大小写）
-3. 也检查富化数据的 `method_names`（如果有残留数据）
+3. 也检查富化数据的 `method_name` 与 `method_names`（如果有残留数据）
 
 **3c: 插入笔记链接**
 

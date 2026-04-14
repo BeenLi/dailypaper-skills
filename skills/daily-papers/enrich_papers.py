@@ -54,12 +54,28 @@ METHOD_STOP = {
     "LaTeX", "BibTeX", "ArXiv",
 }
 
-# ── Real-world experiment keywords ──────────────────────────────────────────
-REAL_WORLD_KEYWORDS = [
-    "real robot", "real-world experiment", "physical robot",
-    "real world evaluation", "hardware experiment", "deployed on",
-    "real-world deployment", "real manipulation", "physical experiment",
-    "real-world result", "real-world task", "real-world environment",
+# ── Systems eval signal keywords ────────────────────────────────────────────
+HARDWARE_EVAL_KEYWORDS = [
+    "gpu", "cpu", "nic", "fpga", "tpu", "server", "node", "cluster",
+    "a100", "h100", "h800", "l40s", "rtx 4090", "rtx4090", "rtx 5090", "rtx5090",
+    "tensor core", "rdma", "roce", "infiniband", "pcie", "hbm",
+]
+
+END_TO_END_EVAL_KEYWORDS = [
+    "end-to-end", "end to end", "serving evaluation", "request latency",
+    "tokens per second", "throughput", "tail latency", "ttft", "e2e",
+    "full system", "online serving", "serving system", "inference engine",
+]
+
+REAL_WORKLOAD_KEYWORDS = [
+    "production trace", "real trace", "cluster trace", "datacenter trace",
+    "serving trace", "online workload", "real workload", "workload trace",
+    "trace-driven", "trace driven", "replay trace",
+]
+
+SYNTHETIC_WORKLOAD_KEYWORDS = [
+    "synthetic workload", "synthetic trace", "simulated workload",
+    "generated workload", "random workload", "toy workload",
 ]
 
 # ── Institution keywords for HTML affiliation extraction ────────────────────
@@ -203,10 +219,26 @@ def extract_captions(html: str) -> list[str]:
     return captions[:8]
 
 
-def extract_has_real_world(html: str) -> bool:
-    """Check if HTML contains real-world experiment keywords."""
+def extract_has_hardware_eval(html: str) -> bool:
+    """Check if HTML mentions concrete hardware evaluation targets."""
     html_lower = html.lower()
-    return any(kw in html_lower for kw in REAL_WORLD_KEYWORDS)
+    return any(kw in html_lower for kw in HARDWARE_EVAL_KEYWORDS)
+
+
+def extract_has_end_to_end_eval(html: str) -> bool:
+    """Check if HTML mentions end-to-end or serving-system level evaluation."""
+    html_lower = html.lower()
+    return any(kw in html_lower for kw in END_TO_END_EVAL_KEYWORDS)
+
+
+def extract_has_real_workload(html: str) -> bool:
+    """Check if HTML mentions real traces/workloads rather than synthetic ones."""
+    html_lower = html.lower()
+    if not any(kw in html_lower for kw in REAL_WORKLOAD_KEYWORDS):
+        return False
+    if any(kw in html_lower for kw in SYNTHETIC_WORKLOAD_KEYWORDS):
+        return False
+    return True
 
 
 def extract_method_names(html: str, paper_title: str) -> list[str]:
@@ -247,6 +279,31 @@ def extract_method_names(html: str, paper_title: str) -> list[str]:
             break
 
     return method_names
+
+
+def extract_primary_method_name(html: str, paper_title: str) -> str:
+    """Extract a conservative single primary system/method name.
+
+    Rules:
+    1. If the title has a prefix before ':' and it looks like a compact system/method name, use it.
+    2. Otherwise, look for high-confidence system-like tokens in the title only.
+    3. If still not confident, fall back to the full title without trailing punctuation.
+    """
+    title = (paper_title or "").strip()
+    if not title:
+        return ""
+
+    title_no_trailing = title.rstrip(".:; ")
+    if ":" in title:
+        prefix = title.split(":", 1)[0].strip().rstrip(".:; ")
+        if 2 <= len(prefix) <= 40:
+            return prefix
+
+    title_tokens = extract_method_names(title, title_no_trailing)
+    if len(title_tokens) == 1:
+        return title_tokens[0]
+
+    return title_no_trailing
 
 
 def extract_method_summary(html: str) -> str:
@@ -354,6 +411,30 @@ def extract_doi(value: str) -> str:
         return ""
     match = re.search(r"(10\.\d{4,9}/[-._;()/:A-Z0-9]+)", value, re.IGNORECASE)
     return match.group(1) if match else ""
+
+
+def reconstruct_openalex_abstract(inverted_index: dict) -> str:
+    if not isinstance(inverted_index, dict) or not inverted_index:
+        return ""
+
+    max_pos = -1
+    for positions in inverted_index.values():
+        if isinstance(positions, list) and positions:
+            max_pos = max(max_pos, max(positions))
+    if max_pos < 0:
+        return ""
+
+    words = [""] * (max_pos + 1)
+    for token, positions in inverted_index.items():
+        if not isinstance(positions, list):
+            continue
+        for pos in positions:
+            if 0 <= pos <= max_pos:
+                words[pos] = token
+
+    text = " ".join(word for word in words if word).strip()
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    return text
 
 
 async def search_arxiv_by_title(title: str, sem: asyncio.Semaphore) -> dict:
@@ -551,6 +632,74 @@ async def search_semantic_scholar_by_doi(url_or_doi: str, sem: asyncio.Semaphore
     }
 
 
+def _parse_openalex_work(item: dict) -> dict:
+    authors = []
+    affiliations = []
+    for authorship in item.get("authorships") or []:
+        if not isinstance(authorship, dict):
+            continue
+        author = authorship.get("author") or {}
+        if isinstance(author, dict) and author.get("display_name"):
+            authors.append(author["display_name"].strip())
+        for institution in authorship.get("institutions") or []:
+            if isinstance(institution, dict) and institution.get("display_name"):
+                affiliations.append(institution["display_name"].strip())
+
+    doi_value = extract_doi((item.get("doi") or "") or ((item.get("ids") or {}).get("doi") or ""))
+    primary_location = item.get("primary_location") or {}
+    landing_url = ""
+    if isinstance(primary_location, dict):
+        landing_url = primary_location.get("landing_page_url", "") or ""
+
+    return {
+        "title": item.get("display_name", "") or item.get("title", ""),
+        "abstract": reconstruct_openalex_abstract(item.get("abstract_inverted_index") or {}),
+        "authors": authors,
+        "affiliations": list(dict.fromkeys(a for a in affiliations if a)),
+        "url": landing_url or item.get("id", ""),
+        "doi": doi_value,
+    }
+
+
+async def search_openalex_by_doi(url_or_doi: str, sem: asyncio.Semaphore) -> dict:
+    doi = extract_doi(url_or_doi)
+    if not doi:
+        return {}
+
+    url = f"https://api.openalex.org/works?filter=doi:{quote(doi, safe='')}&per-page=1"
+    raw = await curl_fetch(url, sem)
+    if not raw:
+        return {}
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+    results = payload.get("results") or []
+    if not results:
+        return {}
+    return _parse_openalex_work(results[0])
+
+
+async def search_openalex_by_title(title: str, sem: asyncio.Semaphore) -> dict:
+    url = f"https://api.openalex.org/works?search={quote(title)}&per-page=5"
+    raw = await curl_fetch(url, sem)
+    if not raw:
+        return {}
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+    for item in payload.get("results") or []:
+        parsed = _parse_openalex_work(item)
+        if titles_match(title, parsed.get("title", "")):
+            return parsed
+    return {}
+
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PDF affiliation extraction
@@ -607,6 +756,7 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
     doi_api_metadata = {}
     doi_metadata = {}
     semantic_match = {}
+    openalex_match = {}
 
     try:
         if title and not arxiv_id:
@@ -622,10 +772,13 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
             if result.get("url") and "doi" in result.get("url", "").lower():
                 doi_api_metadata = await fetch_doi_metadata(result["url"], sem)
                 semantic_match = await search_semantic_scholar_by_doi(result["url"], sem)
+                openalex_match = await search_openalex_by_doi(result["url"], sem)
             if result.get("url") and "doi.org" in result.get("url", ""):
                 doi_metadata = await fetch_doi_landing_metadata(result["url"], sem)
             if not semantic_match:
                 semantic_match = await search_semantic_scholar_by_title(title, sem)
+            if not openalex_match:
+                openalex_match = await search_openalex_by_title(title, sem)
 
         # Fetch HTML page
         html = ""
@@ -639,17 +792,23 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
         figure_url = ""
         section_headers = []
         captions = []
-        has_real_world = False
+        has_hardware_eval = False
+        has_end_to_end_eval = False
+        has_real_workload = False
+        method_name = ""
         method_names = []
         method_summary = ""
 
-        if html and len(html) > 1000:
+        if html and ("<html" in html.lower() or len(html) > 200):
             figure_url = extract_figure_url(html, arxiv_id)
             html_authors = extract_authors_html(html)
             html_affiliations = extract_affiliations_html(html)
             section_headers = extract_section_headers(html)
             captions = extract_captions(html)
-            has_real_world = extract_has_real_world(html)
+            has_hardware_eval = extract_has_hardware_eval(html)
+            has_end_to_end_eval = extract_has_end_to_end_eval(html)
+            has_real_workload = extract_has_real_workload(html)
+            method_name = extract_primary_method_name(html, title)
             method_names = extract_method_names(html, title)
             method_summary = extract_method_summary(html)
 
@@ -681,7 +840,7 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
             or paper.get("figure_url", "")
         )
 
-        # affiliations: HTML > abs fallback > PDF fallback > arxiv search > DOI API > DOI landing > keep existing input
+        # affiliations: HTML > abs fallback > PDF fallback > arxiv search > OpenAlex > DOI API > DOI landing > keep existing input
         if html_affiliations:
             result["affiliations"] = ", ".join(html_affiliations)
         elif abs_affiliations:
@@ -690,13 +849,15 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
             result["affiliations"] = ", ".join(pdf_affiliations)
         elif arxiv_match.get("affiliations"):
             result["affiliations"] = ", ".join(arxiv_match["affiliations"])
+        elif openalex_match.get("affiliations"):
+            result["affiliations"] = ", ".join(openalex_match["affiliations"])
         elif doi_api_metadata.get("affiliations"):
             result["affiliations"] = ", ".join(doi_api_metadata["affiliations"])
         elif doi_metadata.get("affiliations"):
             result["affiliations"] = ", ".join(doi_metadata["affiliations"])
         # else: keep whatever was in the input (supports re-enriching enriched data)
 
-        # authors: HTML > abs fallback > arxiv search > semantic scholar > DOI API > DOI landing > keep existing input
+        # authors: HTML > abs fallback > arxiv search > semantic scholar > OpenAlex > DOI API > DOI landing > keep existing input
         if html_authors:
             result["authors"] = ", ".join(html_authors)
         elif abs_authors:
@@ -705,17 +866,20 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
             result["authors"] = ", ".join(arxiv_match["authors"])
         elif semantic_match.get("authors"):
             result["authors"] = ", ".join(semantic_match["authors"])
+        elif openalex_match.get("authors"):
+            result["authors"] = ", ".join(openalex_match["authors"])
         elif doi_api_metadata.get("authors"):
             result["authors"] = ", ".join(doi_api_metadata["authors"])
         elif doi_metadata.get("authors"):
             result["authors"] = ", ".join(doi_metadata["authors"])
         # else: keep original
 
-        # abstract: keep existing > arxiv search > semantic scholar > DOI API > DOI landing
+        # abstract: keep existing > arxiv search > semantic scholar > OpenAlex > DOI API > DOI landing
         if not result.get("abstract"):
             result["abstract"] = (
                 arxiv_match.get("abstract", "")
                 or semantic_match.get("abstract", "")
+                or openalex_match.get("abstract", "")
                 or doi_api_metadata.get("abstract", "")
                 or doi_metadata.get("abstract", "")
                 or paper.get("abstract", "")
@@ -724,7 +888,10 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
         # Other enriched fields
         result["section_headers"] = section_headers
         result["captions"] = captions
-        result["has_real_world"] = has_real_world
+        result["has_hardware_eval"] = has_hardware_eval
+        result["has_end_to_end_eval"] = has_end_to_end_eval
+        result["has_real_workload"] = has_real_workload
+        result["method_name"] = method_name or result.get("method_name", "") or extract_primary_method_name("", title)
         if not method_names and arxiv_match.get("title"):
             method_names = extract_method_names(arxiv_match.get("title", ""), title)
         result["method_names"] = method_names or result.get("method_names", [])
@@ -736,6 +903,7 @@ async def enrich_one(paper: dict, sem: asyncio.Semaphore) -> dict:
 
         result["doi"] = (
             doi_api_metadata.get("doi", "")
+            or openalex_match.get("doi", "")
             or semantic_match.get("external_ids", {}).get("DOI", "")
             or result.get("doi", "")
         )

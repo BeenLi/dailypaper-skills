@@ -1,7 +1,7 @@
 ---
 name: daily-papers-fetch
 description: |
-  论文抓取（3 步流水线的第 1 步）。抓取 systems 方向最新论文，打分筛选，富化信息，
+  论文抓取（3 步流水线的第 1 步）。抓取 LLM 相关的体系结构、网络通信、存储/内存系统论文，打分筛选，富化信息，
   输出到 /tmp/daily_papers_enriched.json 供后续 skill 使用。
 
   触发词："论文抓取"、"跑一下论文抓取"
@@ -12,7 +12,7 @@ description: |
 
 # 论文抓取 (Fetch + Score + Enrich)
 
-面向 `computer architecture / networking / distributed systems / compiler-runtime / LLM systems` 的论文抓取入口。
+面向 `computer architecture / networking / memory-storage for LLM` 的论文抓取入口。
 
 ## Step 0: 读取共享配置
 
@@ -60,7 +60,7 @@ python3 ../daily-papers/fetch_and_score.py --days N > /tmp/daily_papers_top30.js
 - 补抓最近会议的 `program pages`
 - 抓 `arXiv API`
 - 候选不足时再用 `Semantic Scholar` 做补充
-- 关键词打分、历史去重、Top-N 选择
+- 按 LLM systems 相关关键词打分、历史去重、Top-N 选择
 
 默认目标 venue 包括：
 
@@ -83,7 +83,10 @@ cat /tmp/daily_papers_top30.json | python3 ../daily-papers/enrich_papers.py /tmp
 - `affiliations`
 - `section_headers`
 - `captions`
-- `has_real_world`
+- `has_hardware_eval`
+- `has_end_to_end_eval`
+- `has_real_workload`
+- `method_name`
 - `method_names`
 - `method_summary`
 
@@ -98,6 +101,7 @@ cat /tmp/daily_papers_top30.json | python3 ../daily-papers/enrich_papers.py /tmp
 ## 注意事项
 
 - 默认不再依赖 Hugging Face daily / trending。
-- systems 方向的候选优先来自 venue 页面与 arXiv，不是热榜。
+- 候选应优先落在 `LLM inference / serving / training` 的体系结构、网络通信、存储/内存问题上。
+- 与 LLM 无关的通用 systems 论文，即便来自顶会，也不应该因为 venue 强就自动进推荐。
 - 如果 DBLP 或 program page 不可用，允许退化到 arXiv + Semantic Scholar。
 - 不做 git 操作，不生成推荐文件，只输出临时 JSON。

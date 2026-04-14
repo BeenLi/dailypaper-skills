@@ -166,6 +166,102 @@ class EnrichPapersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enriched["authors"], "A. Author, D. Author")
         self.assertIn("phase-disaggregated", enriched["method_summary"].lower())
 
+    async def test_openalex_doi_fallback_reconstructs_abstract(self):
+        paper = {
+            "title": "AutoCCL: Automated Collective Communication Tuning for Accelerating Distributed and Parallel DNN Training.",
+            "authors": "",
+            "abstract": "",
+            "url": "https://doi.org/10.1145/example4",
+            "source": "dblp",
+            "venue": "NSDI 2025",
+        }
+
+        openalex_match = {
+            "abstract": "AutoCCL automates collective communication tuning for distributed training systems.",
+            "authors": ["A. Author", "E. Author"],
+            "affiliations": ["OpenAlex Systems Lab"],
+            "url": "https://openalex.org/W1234567890",
+            "doi": "10.1145/example4",
+        }
+
+        with patch.object(self.module, "search_arxiv_by_title", AsyncMock(return_value={})), \
+             patch.object(self.module, "curl_fetch", AsyncMock(return_value="")), \
+             patch.object(self.module, "fetch_doi_metadata", AsyncMock(return_value={})), \
+             patch.object(self.module, "search_semantic_scholar_by_doi", AsyncMock(return_value={})), \
+             patch.object(self.module, "search_semantic_scholar_by_title", AsyncMock(return_value={})), \
+             patch.object(self.module, "search_openalex_by_doi", AsyncMock(return_value=openalex_match)), \
+             patch.object(self.module, "search_openalex_by_title", AsyncMock(return_value={})), \
+             patch.object(self.module, "fetch_doi_landing_metadata", AsyncMock(return_value={})):
+            enriched = await self.module.enrich_one(paper, self.module.asyncio.Semaphore(1))
+
+        self.assertEqual(enriched["abstract"], openalex_match["abstract"])
+        self.assertEqual(enriched["authors"], "A. Author, E. Author")
+        self.assertEqual(enriched["affiliations"], "OpenAlex Systems Lab")
+        self.assertTrue(enriched["method_summary"])
+
+    def test_extract_primary_method_name_prefers_title_prefix_before_colon(self):
+        method_name = self.module.extract_primary_method_name(
+            "<html></html>",
+            "WindServe: Efficient Phase-Disaggregated LLM Serving with Stream-based Dynamic Scheduling.",
+        )
+        self.assertEqual(method_name, "WindServe")
+
+    def test_extract_primary_method_name_falls_back_to_title_when_not_confident(self):
+        title = "Compression-Aware Gradient Splitting for Collective Communications in Distributed Training."
+        method_name = self.module.extract_primary_method_name("<html></html>", title)
+        self.assertEqual(method_name, title.rstrip("."))
+
+    async def test_html_enrichment_populates_llm_system_eval_flags_and_method_name(self):
+        paper = {
+            "title": "InstAttention: In-Storage Attention Offloading for Cost-Effective Long-Context LLM Inference.",
+            "authors": "",
+            "abstract": "",
+            "url": "https://doi.org/10.1145/example5",
+            "source": "dblp",
+            "venue": "ASPLOS 2026",
+        }
+
+        html = """
+        <html>
+          <body>
+            <h2>Evaluation</h2>
+            <p>We evaluate InstAttention on NVIDIA H100 GPU servers and a 16-node GPU cluster.</p>
+            <p>Our end-to-end serving evaluation reports request latency and tokens per second.</p>
+            <p>We replay a production trace collected from an online LLM serving system.</p>
+          </body>
+        </html>
+        """
+
+        arxiv_match = {
+            "arxiv_id": "2604.12345",
+            "title": paper["title"],
+            "abstract": "",
+            "authors": [],
+            "affiliations": [],
+            "url": "https://arxiv.org/abs/2604.12345",
+            "pdf": "https://arxiv.org/pdf/2604.12345",
+        }
+
+        async def fake_curl_fetch(url, sem, timeout=30, retries=3):
+            if "arxiv.org/html/2604.12345" in url:
+                return html
+            return ""
+
+        with patch.object(self.module, "search_arxiv_by_title", AsyncMock(return_value=arxiv_match)), \
+             patch.object(self.module, "curl_fetch", AsyncMock(side_effect=fake_curl_fetch)), \
+             patch.object(self.module, "fetch_doi_metadata", AsyncMock(return_value={})), \
+             patch.object(self.module, "search_semantic_scholar_by_doi", AsyncMock(return_value={})), \
+             patch.object(self.module, "search_semantic_scholar_by_title", AsyncMock(return_value={})), \
+             patch.object(self.module, "search_openalex_by_doi", AsyncMock(return_value={})), \
+             patch.object(self.module, "search_openalex_by_title", AsyncMock(return_value={})), \
+             patch.object(self.module, "fetch_doi_landing_metadata", AsyncMock(return_value={})):
+            enriched = await self.module.enrich_one(paper, self.module.asyncio.Semaphore(1))
+
+        self.assertEqual(enriched["method_name"], "InstAttention")
+        self.assertTrue(enriched["has_hardware_eval"])
+        self.assertTrue(enriched["has_end_to_end_eval"])
+        self.assertTrue(enriched["has_real_workload"])
+
 
 if __name__ == "__main__":
     unittest.main()

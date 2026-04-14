@@ -105,7 +105,7 @@ DEFAULT_CONFIG = {
         ],
         "arxiv_categories": ["cs.AR", "cs.DC", "cs.NI", "cs.OS", "cs.PL", "cs.AI", "cs.LG"],
         "min_score": 2,
-        "top_n": 30,
+        "top_n": 5,
     },
     "automation": {
         "auto_refresh_indexes": True,
