@@ -67,6 +67,7 @@ class SystemsTemplateTests(unittest.TestCase):
         self.assertNotIn("### 损失函数", text)
         self.assertNotIn("### 数据集", text)
         self.assertIn("| 论文 | 外部链接 | 关系 | 差异 |", text)
+        self.assertIn("| 主对比基线 |  |", text)
 
     def test_related_work_table_requires_internal_and_external_link_slots(self):
         asset_text = ASSET_TEMPLATE.read_text(encoding="utf-8")
@@ -84,6 +85,7 @@ class SystemsTemplateTests(unittest.TestCase):
         self.assertIn("复现与借鉴价值", text)
         self.assertIn("baseline 是否公平", text)
         self.assertIn("实验设置", text)
+        self.assertIn("主对比基线", text)
 
     def test_daily_notes_skill_uses_new_template_quality_gates(self):
         text = DAILY_PAPERS_NOTES_SKILL.read_text(encoding="utf-8")

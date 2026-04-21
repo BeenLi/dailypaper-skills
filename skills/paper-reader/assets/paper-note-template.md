@@ -34,7 +34,7 @@ created: {date}
 | 作者 | {Authors} |
 | 机构 | {Affiliations} |
 | 发表 | {Venue}, {Year} |
-| 对比基线 | [[{baseline_paper}]] / {other_baselines} |
+| 主对比基线 | [[{baseline_paper}]] / {other_baselines} |
 | 链接 | [arXiv]({arxiv_url}) / [Paper]({paper_url}) / [Code]({code_url}) |
 
 ---
