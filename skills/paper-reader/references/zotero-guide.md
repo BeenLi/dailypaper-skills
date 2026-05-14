@@ -8,6 +8,9 @@ python3 assets/zotero_helper.py collections         # 列出所有分类
 python3 assets/zotero_helper.py papers 1            # 列出分类ID=1的论文
 python3 assets/zotero_helper.py papers 1 --recursive # 递归包含子分类
 python3 assets/zotero_helper.py pdf 12345           # 获取论文PDF路径
+python3 assets/zotero_helper.py resolve --query "EBPC" --limit 10
+python3 assets/zotero_helper.py resolve --item-id 2487
+python3 assets/zotero_helper.py resolve --collection "Link & Fabric Integration" --recursive
 ```
 
 **递归查询原理**：
@@ -43,26 +46,30 @@ def get_collection_path(collection_id):
     return '/'.join(path_parts)
 ```
 
-## 智能分类判断
+## 结构化解析与保存路径
 
-**不要依赖关键词匹配！** 必须理解论文核心贡献后判断。
+`resolve` 命令输出 JSON，包含：
 
-### 判断流程
+- `item_id`、`title`、`authors`、`year`、`venue`
+- `url`、`doi`、`arxiv_id`、`pdf_path`
+- `collection_paths`: item 所在全部 collection 完整路径
+- `source_collection_path`: 批量递归 collection 时，item 在该 subtree 下最具体的来源 collection
 
-1. **理解论文核心贡献** — 解决什么问题？核心方法？目标应用？
-2. **查看现有分类**：`python3 assets/zotero_helper.py collections`
-3. **选最合适的** — 问自己：找这篇论文会去哪个分类？按**主要贡献**分类，而非使用的技术
-4. **交叉学科** — 可添加到多个分类，选最核心的作为主分类
+Obsidian 保存路径使用 `{NOTES_PATH}/{selected_collection_path}/{MethodName}.md`。没有 collection 的 item 保存到 `{NOTES_PATH}/_inbox/{MethodName}.md`。
 
-### 分类判断示例
+```bash
+python3 assets/zotero_helper.py note-path EBPC \
+  --collection-path "Research Topics/Lossless Communication Compression/Link & Fabric Integration" \
+  --zotero-item-id 2487
+```
 
-| 论文 | 错误分类 | 正确分类 | 理由 |
-|------|----------|----------|------|
-| 用 kernel fusion 做 LLM inference | LLM | Runtime Systems | 核心是运行时优化 |
-| 用 RDMA 优化 distributed training | Distributed Training | Networking and Interconnects | 核心瓶颈在通信 |
-| 一个新的 serving benchmark | Distributed Systems | Performance and Benchmarking | 主要贡献是评测体系 |
+## 分类判断
+
+Zotero 默认只读。阅读时不要按关键词自动改 Zotero 分类；如果分类明显不对，只给出建议和理由，等用户确认后再执行修改命令。
 
 ## Zotero 分类操作
+
+⚠️ 以下命令会修改 Zotero 数据库。默认不要主动调用；先在笔记或回复里写出分类调整建议和理由，只有用户明确确认执行后才调用：
 
 ```bash
 # 查看论文当前分类
@@ -73,13 +80,6 @@ python3 assets/zotero_helper.py find-collection "Distributed Systems"
 python3 assets/zotero_helper.py move {item_id} {new_collection_id} --from {old_collection_id}
 # 添加到多个分类
 python3 assets/zotero_helper.py add-to-collection {item_id} {collection_id}
+# 从分类移除
+python3 assets/zotero_helper.py remove-from-collection {item_id} {collection_id}
 ```
-
-### 何时移动分类
-
-| 当前分类 | 处理方式 |
-|----------|----------|
-| "2025"、"杂项"、"feifeili" 等临时分类 | **必须移动** |
-| 分类与论文内容不符 | 移动到正确分类 |
-| 基本正确但可更精确 | 可选：移动到子分类 |
-| 完全正确 | 保持不变 |

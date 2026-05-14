@@ -27,6 +27,8 @@ import time
 import argparse
 import logging
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
@@ -35,8 +37,12 @@ from zoneinfo import ZoneInfo
 _SHARED_DIR = Path(__file__).resolve().parents[1] / "_shared"
 if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
+_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+if str(_ASSETS_DIR) not in sys.path:
+    sys.path.insert(0, str(_ASSETS_DIR))
 
 from user_config import concepts_dir, obsidian_vault_path, paper_notes_dir, zotero_db_path, zotero_storage_dir
+from zotero_helper import build_note_index, find_matching_notes, infer_method_name, plan_note_save
 
 # 配置
 ZOTERO_DB = str(zotero_db_path())
@@ -71,17 +77,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-_SUBSCRIPT_TRANSLATION = str.maketrans("₀₁₂₃₄₅₆₇₈₉₊₋", "0123456789+-")
-_GREEK_REPLACEMENTS = {
-    "π": "pi",
-    "ϕ": "phi",
-    "φ": "phi",
-    "α": "alpha",
-    "β": "beta",
-    "γ": "gamma",
-}
-
 
 def acquire_lock() -> bool:
     """获取进程锁，防止重复运行"""
@@ -164,8 +159,9 @@ def parse_reset_wait_seconds(message: str) -> Optional[int]:
 
 def copy_zotero_db() -> str:
     """复制 Zotero 数据库以避免锁定"""
-    tmp_db = "/tmp/zotero_readonly.sqlite"
-    subprocess.run(["cp", ZOTERO_DB, tmp_db], check=True)
+    fd, tmp_db = tempfile.mkstemp(prefix="zotero_readonly_", suffix=".sqlite")
+    os.close(fd)
+    shutil.copy2(ZOTERO_DB, tmp_db)
     return tmp_db
 
 
@@ -232,21 +228,54 @@ def get_papers_in_collection(db_path: str, collection_id: int) -> list[dict]:
 
     collection_ids = get_all_child_collections(db_path, collection_id)
     placeholders = ','.join('?' * len(collection_ids))
+    cursor.execute("SELECT collectionID, collectionName, parentCollectionID FROM collections")
+    collections = {row[0]: {'name': row[1], 'parent': row[2]} for row in cursor.fetchall()}
+
+    def get_path(cid: int) -> str:
+        path_parts = []
+        current = cid
+        while current:
+            info = collections.get(current)
+            if not info:
+                break
+            path_parts.insert(0, info['name'])
+            current = info['parent']
+        return '/'.join(path_parts)
+
+    def depth(cid: int) -> int:
+        return len([part for part in get_path(cid).split('/') if part])
+
     query = f"""
-        SELECT DISTINCT i.itemID, idv.value as title
+        SELECT i.itemID, idv.value as title, ci.collectionID
         FROM items i
         JOIN collectionItems ci ON i.itemID = ci.itemID
         JOIN itemData id ON i.itemID = id.itemID
         JOIN itemDataValues idv ON id.valueID = idv.valueID
         JOIN fields f ON id.fieldID = f.fieldID
         WHERE ci.collectionID IN ({placeholders}) AND f.fieldName = 'title' AND i.itemTypeID != 14
+        ORDER BY i.itemID
     """
     cursor.execute(query, collection_ids)
     logger.info(f"递归查询，包含 {len(collection_ids)} 个分类")
 
-    papers = [{'item_id': row[0], 'title': row[1]} for row in cursor.fetchall()]
+    titles: dict[int, str] = {}
+    source_candidates: dict[int, list[int]] = {}
+    for item_id, title, source_collection_id in cursor.fetchall():
+        titles[item_id] = title
+        source_candidates.setdefault(item_id, []).append(source_collection_id)
+
+    papers = []
+    for item_id, candidate_ids in source_candidates.items():
+        source_collection_id = sorted(candidate_ids, key=lambda cid: (-depth(cid), get_path(cid)))[0]
+        papers.append(
+            {
+                'item_id': item_id,
+                'title': titles[item_id],
+                'source_collection_path': get_path(source_collection_id),
+            }
+        )
     conn.close()
-    return papers
+    return sorted(papers, key=lambda paper: paper['title'])
 
 
 def get_pdf_path(db_path: str, item_id: int) -> Optional[str]:
@@ -319,77 +348,6 @@ def get_paper_online_source(db_path: str, item_id: int) -> Optional[dict]:
 
     return result if result else None
 
-
-def get_existing_notes() -> dict[str, str]:
-    """获取 Obsidian 中已有的笔记（返回 {方法名: 文件路径}）"""
-    existing = {}
-    notes_dir = Path(PAPER_NOTES_ROOT)
-    if notes_dir.exists():
-        for md_file in notes_dir.rglob("*.md"):
-            name = md_file.stem
-            relative_parts = md_file.relative_to(notes_dir).parts
-            # 跳过 _inbox, _概念 等特殊目录和目录页
-            if any(part.startswith("_") for part in relative_parts):
-                continue
-            if md_file.parent.name == name:
-                continue
-
-            for method_name in _extract_note_method_names(name):
-                existing[method_name] = str(md_file)
-    return existing
-
-
-def title_matches_note(title: str, existing_notes: dict[str, str]) -> bool:
-    """
-    检查论文标题是否与已有笔记匹配
-    只有精确匹配方法名时才返回 True
-    """
-    if not title:
-        return False
-
-    normalized_candidates = {
-        _normalize_method_name(title.strip()),
-        _normalize_method_name(title.split(':', 1)[0].strip()),
-    }
-
-    for method_normalized in normalized_candidates:
-        if not method_normalized:
-            continue
-        for note_method in existing_notes.keys():
-            # 完全相等
-            if note_method == method_normalized:
-                return True
-            # 笔记方法名完全包含在标题方法名中（且长度相近）
-            if note_method in method_normalized and len(note_method) > 3:
-                # 确保不是太短的匹配（避免 "gs" 匹配 "3dgs"）
-                if len(note_method) >= len(method_normalized) * 0.5:
-                    return True
-
-    return False
-
-
-def _normalize_method_name(value: str) -> str:
-    normalized = value.strip().lower().translate(_SUBSCRIPT_TRANSLATION)
-    for source, target in _GREEK_REPLACEMENTS.items():
-        normalized = normalized.replace(source, target)
-    normalized = normalized.replace("&", "and")
-    return re.sub(r"[^a-z0-9]+", "", normalized)
-
-
-def _extract_note_method_names(stem: str) -> set[str]:
-    candidates = {stem}
-
-    match = re.match(r"^(?:19|20)\d{2}_(.+)$", stem)
-    if match:
-        candidates.add(match.group(1))
-
-    return {
-        normalized
-        for candidate in candidates
-        if (normalized := _normalize_method_name(candidate))
-    }
-
-
 def load_progress() -> dict:
     """加载进度"""
     if os.path.exists(PROGRESS_FILE):
@@ -405,7 +363,7 @@ def save_progress(progress: dict):
         json.dump(progress, f, indent=2, ensure_ascii=False)
 
 
-def call_codex(paper_source: dict, collection_path: str, item_id: int) -> tuple[bool, str]:
+def call_codex(paper_source: dict, collection_path: str, item_id: int, save_plan: Optional[dict] = None) -> tuple[bool, str]:
     """
     调用 Codex 处理论文
 
@@ -439,6 +397,18 @@ def call_codex(paper_source: dict, collection_path: str, item_id: int) -> tuple[
         source_lines.append(f"论文标题: {paper_source['title']}")
 
     source_info = '\n'.join(source_lines)
+    if save_plan:
+        save_instruction = f"""Zotero 来源 collection 路径: {collection_path}
+Obsidian 保存计划:
+- action: {save_plan.get('action')}
+- 保存到目标路径: {save_plan.get('target_path')}
+- 已有笔记路径: {save_plan.get('existing_path') or '无'}
+- frontmatter 更新: {json.dumps(save_plan.get('frontmatter_updates', {}), ensure_ascii=False)}
+
+请严格写入“保存到目标路径”，不要自行决定保存位置；collection_path 只用于理解 Zotero 来源，frontmatter 使用上面的更新值。"""
+    else:
+        save_instruction = f"""Zotero 来源 collection 路径: {collection_path}
+Obsidian 保存计划: 未提供。必须先调用 `zotero_helper.py note-path` 规划 target_path 后再写入。"""
 
     # 如果没有 PDF，添加特殊说明
     no_pdf_instruction = ""
@@ -472,8 +442,8 @@ def call_codex(paper_source: dict, collection_path: str, item_id: int) -> tuple[
     prompt = f"""请使用 `paper-reader` skill 读取并分析这篇论文，生成完整的结构化笔记。
 
 {source_info}
-Zotero 分类路径: {collection_path}
 Zotero ItemID: {item_id}
+{save_instruction}
 {no_pdf_instruction}
 
 ## 质量要求（重要）
@@ -547,32 +517,19 @@ $$公式$$
 3. 对于不存在的概念，创建概念笔记文件
 4. 使用 Write 工具写入概念笔记
 
-## 自动分类与 Zotero 同步（重要）
+## Zotero 与保存规则（重要）
 
-**不要依赖关键词匹配！** 你需要真正理解论文后自主判断分类。
-
-### 分类判断原则
-1. 理解论文的**核心贡献**是什么
-2. 问自己：如果我要找这篇论文，我会去哪个分类找？
-3. 按**主要贡献**分类，而不是使用的技术
-   - 例：用 Runtime 做 LLM serving → Distributed Systems，不是 Generative Models
-   - 例：用 3DGS 做 SLAM → SLAM，不是 3DGS
-
-### 分类操作
-使用 zotero_helper.py 脚本：
-- collections: 列出所有分类
-- find-collection "名称": 查找分类ID
-- move <item_id> <collection_id>: 移动论文
-
-### 何时必须移动
-- 当前在 "2025"、"杂项"、"feifeili" 等临时分类 → 必须移动
-- 分类与论文内容明显不符 → 移动
+- Zotero 默认只读；不要移动、添加或删除 Zotero collection。
+- 如果你判断 Zotero 分类明显不对，只在笔记末尾或执行总结中提出建议和理由，不要调用修改 Zotero 的命令。
+- `zotero_item_id` 与 `zotero_collection` 必须按“frontmatter 更新”中的值写入 frontmatter。
+- 不要把未清洗的 Zotero 来源 collection 路径直接写入 `zotero_collection`。
 
 ## 保存位置
 
-根据你对论文的理解，保存到对应的 Obsidian 目录：
-- 基本结构：{notes_root}/对应分类路径/
-- 不确定时：{notes_root}/_inbox/
+- “保存到目标路径”是唯一权威写入位置。
+- 不要用 `{notes_root}/{collection_path}/` 自行拼路径；Python 侧已完成 collection path 清洗与冲突处理。
+- 文件名只用方法名 / 系统名；如果保存计划已给出文件名，沿用目标路径。
+- 不确定方法名时保存为保守的论文标题，但仍必须先经过保存计划规划路径。
 
 请直接开始处理，不需要确认。提取所有公式、图片和表格。"""
 
@@ -622,121 +579,151 @@ def process_collection(collection_name: str, resume: bool = True):
     logger.info(f"=== 开始处理分类: {collection_name} ===")
 
     db_path = copy_zotero_db()
+    try:
+        collection_id, collection_path = get_collection_id_and_path(db_path, collection_name)
+        if not collection_id:
+            logger.error(f"找不到分类: {collection_name}")
+            return
 
-    collection_id, collection_path = get_collection_id_and_path(db_path, collection_name)
-    if not collection_id:
-        logger.error(f"找不到分类: {collection_name}")
-        return
+        logger.info(f"分类路径: {collection_path} (ID: {collection_id})")
 
-    logger.info(f"分类路径: {collection_path} (ID: {collection_id})")
+        papers = get_papers_in_collection(db_path, collection_id)
+        logger.info(f"分类下共有 {len(papers)} 篇论文")
 
-    papers = get_papers_in_collection(db_path, collection_id)
-    logger.info(f"分类下共有 {len(papers)} 篇论文")
+        progress = load_progress() if resume else {'completed': [], 'failed': [], 'current': None, 'started_at': None}
+        if not progress['started_at']:
+            progress['started_at'] = datetime.now().isoformat()
 
-    progress = load_progress() if resume else {'completed': [], 'failed': [], 'current': None, 'started_at': None}
-    if not progress['started_at']:
-        progress['started_at'] = datetime.now().isoformat()
+        # 获取已有笔记索引。包含 _inbox，排除 _concepts 和 _index_ MOC。
+        note_index = build_note_index(Path(PAPER_NOTES_ROOT))
+        logger.info(f"Obsidian 中已有 {len(note_index.records)} 篇可查重论文笔记")
 
-    # 获取已有笔记
-    existing_notes = get_existing_notes()
-    logger.info(f"Obsidian 中已有 {len(existing_notes)} 篇笔记")
+        # 过滤待处理论文
+        pending = []
+        skipped_existing = 0
+        for paper in papers:
+            item_id = paper['item_id']
+            title = paper['title']
+            source_collection_path = paper.get('source_collection_path') or collection_path
 
-    # 过滤待处理论文
-    pending = []
-    skipped_existing = 0
-    for paper in papers:
-        item_id = paper['item_id']
-        title = paper['title']
-
-        if item_id in progress['completed']:
-            continue
-
-        # 检查是否已有笔记
-        if title_matches_note(title, existing_notes):
-            logger.info(f"跳过 (已有笔记): {title[:50]}")
-            skipped_existing += 1
-            progress['completed'].append(item_id)  # 标记为已完成
-            continue
-
-        pdf_path = get_pdf_path(db_path, item_id)
-        paper_source = {'title': title}
-
-        if pdf_path and os.path.exists(pdf_path):
-            paper_source['pdf_path'] = pdf_path
-        else:
-            # 尝试获取在线来源
-            online_source = get_paper_online_source(db_path, item_id)
-            if online_source:
-                paper_source.update(online_source)
-                logger.info(f"无本地 PDF，使用在线来源: {list(online_source.keys())}")
-            else:
-                logger.warning(f"跳过 (无PDF且无在线来源): {title[:50]}")
+            if item_id in progress['completed']:
                 continue
 
-        pending.append({**paper, 'source': paper_source})
+            online_source = get_paper_online_source(db_path, item_id) or {}
+            method_name = infer_method_name(title)
+            matches = find_matching_notes(
+                Path(PAPER_NOTES_ROOT),
+                zotero_item_id=item_id,
+                doi=online_source.get('doi'),
+                arxiv_id=online_source.get('arxiv_id'),
+                title=title,
+                method_name=method_name,
+                index=note_index,
+            )
+            save_plan = plan_note_save(
+                Path(PAPER_NOTES_ROOT),
+                method_name,
+                source_collection_path,
+                batch=True,
+                zotero_item_id=item_id,
+                doi=online_source.get('doi'),
+                arxiv_id=online_source.get('arxiv_id'),
+                title=title,
+                matches=matches,
+            )
 
-    if skipped_existing > 0:
-        logger.info(f"跳过已有笔记: {skipped_existing} 篇")
-        save_progress(progress)
+            # 检查是否已有笔记
+            if save_plan["action"] == "conflict":
+                logger.warning(f"跳过 (查重冲突，需要人工处理): {title[:50]} -> {save_plan.get('candidate_paths')}")
+                skipped_existing += 1
+                continue
+            if save_plan["action"] == "skip":
+                logger.info(f"跳过 (已有笔记): {title[:50]}")
+                skipped_existing += 1
+                progress['completed'].append(item_id)  # 标记为已完成
+                continue
 
-    logger.info(f"待处理: {len(pending)} 篇")
+            pdf_path = get_pdf_path(db_path, item_id)
+            paper_source = {'title': title, **online_source}
 
-    wait_time = INITIAL_WAIT
-
-    for i, paper in enumerate(pending):
-        item_id = paper['item_id']
-        title = paper['title']
-        paper_source = paper['source']
-
-        source_type = "PDF" if paper_source.get('pdf_path') else "在线"
-        logger.info(f"\n[{i+1}/{len(pending)}] 处理 ({source_type}): {title[:60]}...")
-        progress['current'] = {'item_id': item_id, 'title': title}
-        save_progress(progress)
-
-        success, error = call_codex(paper_source, collection_path, item_id)
-
-        if success:
-            logger.info(f"✓ 完成: {title[:50]}")
-            progress['completed'].append(item_id)
-            progress['current'] = None
-            save_progress(progress)
-            wait_time = INITIAL_WAIT
-
-            if i < len(pending) - 1:
-                time.sleep(BETWEEN_PAPERS_WAIT)
-
-        elif error == 'RATE_LIMIT':
-            logger.warning(f"⏳ Rate limit, 等待 {wait_time} 秒...")
-            time.sleep(wait_time)
-            wait_time = min(wait_time * WAIT_MULTIPLIER, MAX_WAIT)
-            pending.insert(i + 1, paper)  # 重新加入队列
-
-        elif error.startswith('QUOTA_LIMIT'):
-            reset_wait = parse_reset_wait_seconds(error)
-            if reset_wait:
-                logger.warning(f"⏳ 用量上限，等待到重置（约 {reset_wait // 60} 分钟）...")
-                time.sleep(reset_wait)
+            if pdf_path and os.path.exists(pdf_path):
+                paper_source['pdf_path'] = pdf_path
             else:
-                wait_for_quota_reset()
-            pending.insert(i + 1, paper)  # 重新加入队列
+                # 尝试获取在线来源
+                if online_source:
+                    logger.info(f"无本地 PDF，使用在线来源: {list(online_source.keys())}")
+                else:
+                    logger.warning(f"跳过 (无PDF且无在线来源): {title[:50]}")
+                    continue
 
-        elif error == 'TIMEOUT':
-            logger.error(f"✗ 超时: {title[:50]}")
-            progress['failed'].append({'item_id': item_id, 'title': title, 'error': 'TIMEOUT'})
+            pending.append({**paper, 'source': paper_source, 'source_collection_path': source_collection_path, 'save_plan': save_plan})
+
+        if skipped_existing > 0:
+            logger.info(f"跳过已有笔记: {skipped_existing} 篇")
             save_progress(progress)
 
-        else:
-            logger.error(f"✗ 失败: {title[:50]} - {error[:100]}")
-            progress['failed'].append({'item_id': item_id, 'title': title, 'error': error[:200]})
+        logger.info(f"待处理: {len(pending)} 篇")
+
+        wait_time = INITIAL_WAIT
+
+        for i, paper in enumerate(pending):
+            item_id = paper['item_id']
+            title = paper['title']
+            paper_source = paper['source']
+            source_collection_path = paper.get('source_collection_path') or collection_path
+            save_plan = paper['save_plan']
+
+            source_type = "PDF" if paper_source.get('pdf_path') else "在线"
+            logger.info(f"\n[{i+1}/{len(pending)}] 处理 ({source_type}): {title[:60]}...")
+            progress['current'] = {'item_id': item_id, 'title': title}
             save_progress(progress)
 
-    progress['current'] = None
-    progress['finished_at'] = datetime.now().isoformat()
-    save_progress(progress)
+            success, error = call_codex(paper_source, source_collection_path, item_id, save_plan)
 
-    logger.info("\n=== 处理完成 ===")
-    logger.info(f"成功: {len(progress['completed'])} 篇")
-    logger.info(f"失败: {len(progress['failed'])} 篇")
+            if success:
+                logger.info(f"✓ 完成: {title[:50]}")
+                progress['completed'].append(item_id)
+                progress['current'] = None
+                save_progress(progress)
+                wait_time = INITIAL_WAIT
+
+                if i < len(pending) - 1:
+                    time.sleep(BETWEEN_PAPERS_WAIT)
+
+            elif error == 'RATE_LIMIT':
+                logger.warning(f"⏳ Rate limit, 等待 {wait_time} 秒...")
+                time.sleep(wait_time)
+                wait_time = min(wait_time * WAIT_MULTIPLIER, MAX_WAIT)
+                pending.insert(i + 1, paper)  # 重新加入队列
+
+            elif error.startswith('QUOTA_LIMIT'):
+                reset_wait = parse_reset_wait_seconds(error)
+                if reset_wait:
+                    logger.warning(f"⏳ 用量上限，等待到重置（约 {reset_wait // 60} 分钟）...")
+                    time.sleep(reset_wait)
+                else:
+                    wait_for_quota_reset()
+                pending.insert(i + 1, paper)  # 重新加入队列
+
+            elif error == 'TIMEOUT':
+                logger.error(f"✗ 超时: {title[:50]}")
+                progress['failed'].append({'item_id': item_id, 'title': title, 'error': 'TIMEOUT'})
+                save_progress(progress)
+
+            else:
+                logger.error(f"✗ 失败: {title[:50]} - {error[:100]}")
+                progress['failed'].append({'item_id': item_id, 'title': title, 'error': error[:200]})
+                save_progress(progress)
+
+        progress['current'] = None
+        progress['finished_at'] = datetime.now().isoformat()
+        save_progress(progress)
+
+        logger.info("\n=== 处理完成 ===")
+        logger.info(f"成功: {len(progress['completed'])} 篇")
+        logger.info(f"失败: {len(progress['failed'])} 篇")
+    finally:
+        Path(db_path).unlink(missing_ok=True)
 
 
 def show_status():

@@ -112,6 +112,9 @@ DEFAULT_CONFIG = {
         "git_commit": False,
         "git_push": False,
     },
+    "mocs": {
+        "filename_prefix": "",
+    },
 }
 
 
@@ -195,3 +198,11 @@ def git_commit_enabled() -> bool:
 
 def git_push_enabled() -> bool:
     return bool(automation_config()["git_push"])
+
+
+def mocs_config() -> dict:
+    return load_user_config().get("mocs", {})
+
+
+def moc_filename_prefix() -> str:
+    return str(mocs_config().get("filename_prefix", "") or "")

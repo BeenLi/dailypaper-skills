@@ -5,9 +5,16 @@ import re
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ASSET_TEMPLATE = REPO_ROOT / "skills" / "paper-reader" / "assets" / "paper-note-template.md"
-OBSIDIAN_TEMPLATE = REPO_ROOT / "obsidian-templates" / "论文笔记模板.md"
+LEGACY_OBSIDIAN_TEMPLATE = REPO_ROOT / "obsidian-templates" / "论文笔记模板.md"
 PAPER_READER_SKILL = REPO_ROOT / "skills" / "paper-reader" / "SKILL.md"
 DAILY_PAPERS_NOTES_SKILL = REPO_ROOT / "skills" / "daily-papers-notes" / "SKILL.md"
+README = REPO_ROOT / "README.md"
+
+
+def assert_table_header(testcase, text, columns):
+    escaped_columns = [re.escape(column) for column in columns]
+    pattern = r"(?m)^\|\s*" + r"\s*\|\s*".join(escaped_columns) + r"\s*\|$"
+    testcase.assertRegex(text, pattern)
 
 
 class SystemsTemplateTests(unittest.TestCase):
@@ -17,6 +24,8 @@ class SystemsTemplateTests(unittest.TestCase):
         required_sections = [
             "## 这篇论文为什么重要",
             "## 问题定义与瓶颈",
+            "## 作者核心 Insights",
+            "## 动机实验 / Characterization",
             "## 系统设计总览",
             "## 关键机制拆解",
             "## 实验设置",
@@ -39,6 +48,11 @@ class SystemsTemplateTests(unittest.TestCase):
         for section in forbidden_sections:
             self.assertNotRegex(text, rf"(?m)^{re.escape(section)}(?:\s|$)")
 
+        self.assertIn("### 硬件改动清单", text)
+        self.assertIn("#### 参数选择 / 设计空间扫描", text)
+        self.assertIn("### 模拟器与微架构参数", text)
+        self.assertIn("#### Silicon-feasibility", text)
+
     def test_asset_template_removes_cv_robotics_defaults(self):
         text = ASSET_TEMPLATE.read_text(encoding="utf-8")
 
@@ -53,30 +67,19 @@ class SystemsTemplateTests(unittest.TestCase):
         for phrase in forbidden_phrases:
             self.assertNotIn(phrase, text)
 
-    def test_obsidian_template_matches_systems_structure(self):
-        text = OBSIDIAN_TEMPLATE.read_text(encoding="utf-8")
+    def test_paper_note_template_is_the_single_template_source(self):
+        readme = README.read_text(encoding="utf-8")
 
-        self.assertIn("## Overhead 与兼容性", text)
-        self.assertIn("## 复现与借鉴价值", text)
-        self.assertIn("## 相关工作定位", text)
-        self.assertIn("## 批判性思考", text)
-        self.assertIn("## 关联笔记", text)
-        self.assertIn("## 速查卡片", text)
-        self.assertNotRegex(text, r"(?m)^## 关键公式(?:\s|$)")
-        self.assertNotRegex(text, r"(?m)^## 关键图表(?:\s|$)")
-        self.assertNotIn("### 损失函数", text)
-        self.assertNotIn("### 数据集", text)
-        self.assertIn("| 论文 | 外部链接 | 关系 | 差异 |", text)
-        self.assertIn("| 主对比基线 |  |", text)
+        self.assertFalse(LEGACY_OBSIDIAN_TEMPLATE.exists())
+        self.assertIn("skills/paper-reader/assets/paper-note-template.md", readme)
+        self.assertNotIn("obsidian-templates/论文笔记模板.md", readme)
 
     def test_related_work_table_requires_internal_and_external_link_slots(self):
         asset_text = ASSET_TEMPLATE.read_text(encoding="utf-8")
-        obsidian_text = OBSIDIAN_TEMPLATE.read_text(encoding="utf-8")
 
-        for text in (asset_text, obsidian_text):
-            self.assertIn("| 论文 | 外部链接 | 关系 | 差异 |", text)
-            self.assertIn("`论文` 列优先写", text)
-            self.assertIn("`外部链接` 列写", text)
+        assert_table_header(self, asset_text, ["论文", "外部链接", "关系", "差异"])
+        self.assertIn("`论文` 列优先写", asset_text)
+        self.assertIn("`外部链接` 列写", asset_text)
 
     def test_paper_reader_skill_mentions_systems_specific_requirements(self):
         text = PAPER_READER_SKILL.read_text(encoding="utf-8")
@@ -86,6 +89,17 @@ class SystemsTemplateTests(unittest.TestCase):
         self.assertIn("baseline 是否公平", text)
         self.assertIn("实验设置", text)
         self.assertIn("主对比基线", text)
+
+    def test_paper_reader_zotero_workflow_is_readonly_and_collection_path_based(self):
+        text = PAPER_READER_SKILL.read_text(encoding="utf-8")
+        asset_text = ASSET_TEMPLATE.read_text(encoding="utf-8")
+
+        self.assertIn("zotero_item_id: {zotero_item_id}", asset_text)
+        self.assertIn("zotero_collection: {zotero_path}", asset_text)
+        self.assertIn("Zotero 默认只读", text)
+        self.assertIn("{NOTES_PATH}/{selected_collection_path}/{MethodName}.md", text)
+        self.assertIn("批量从 collection 进入时", text)
+        self.assertIn("确认后才调用", text)
 
     def test_daily_notes_skill_uses_new_template_quality_gates(self):
         text = DAILY_PAPERS_NOTES_SKILL.read_text(encoding="utf-8")

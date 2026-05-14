@@ -34,6 +34,7 @@ def build_tree_mocs(
     title_prefix: str,
     intro: str,
     exclude_dir_names: Iterable[str] = (),
+    moc_filename_prefix: str = "",
 ) -> MOCSummary:
     root_dir.mkdir(parents=True, exist_ok=True)
     summary = MOCSummary(root_dir=root_dir)
@@ -44,7 +45,7 @@ def build_tree_mocs(
 
     for directory in directories:
         summary.total_directories += 1
-        notes = _note_files(directory)
+        notes = _note_files(directory, moc_filename_prefix)
         summary.indexed_notes += len(notes)
         content = _build_moc_content(
             vault_root=vault_root,
@@ -53,8 +54,9 @@ def build_tree_mocs(
             title_prefix=title_prefix,
             intro=intro,
             exclude_dir_names=excluded,
+            moc_filename_prefix=moc_filename_prefix,
         )
-        moc_path = directory / f"{directory.name}.md"
+        moc_path = directory / _moc_filename(directory, moc_filename_prefix)
         if not moc_path.exists():
             moc_path.write_text(content, encoding="utf-8")
             summary.created_files += 1
@@ -95,8 +97,12 @@ def _subdirs(directory: Path, exclude_dir_names: set[str]) -> list[Path]:
     )
 
 
-def _note_files(directory: Path) -> list[Path]:
-    moc_name = f"{directory.name}.md"
+def _moc_filename(directory: Path, moc_filename_prefix: str) -> str:
+    return f"{moc_filename_prefix}{directory.name}.md"
+
+
+def _note_files(directory: Path, moc_filename_prefix: str = "") -> list[Path]:
+    moc_name = _moc_filename(directory, moc_filename_prefix)
     return sorted(
         (
             path
@@ -118,6 +124,7 @@ def _build_moc_content(
     title_prefix: str,
     intro: str,
     exclude_dir_names: set[str],
+    moc_filename_prefix: str = "",
 ) -> str:
     relative_dir = directory.relative_to(root_dir)
     display_name = _display_name(root_dir, directory)
@@ -146,15 +153,15 @@ def _build_moc_content(
     lines.append("")
 
     subdirs = _subdirs(directory, exclude_dir_names)
-    notes = _note_files(directory)
+    notes = _note_files(directory, moc_filename_prefix)
 
     if subdirs:
         lines.extend(["## 子目录", ""])
         for subdir in subdirs:
-            note_count = len(_note_files(subdir))
+            note_count = len(_note_files(subdir, moc_filename_prefix))
             child_count = len(_subdirs(subdir, exclude_dir_names))
             lines.append(
-                f"- [[{_wikilink(subdir / f'{subdir.name}.md', vault_root)}|{subdir.name}]]"
+                f"- [[{_wikilink(subdir / _moc_filename(subdir, moc_filename_prefix), vault_root)}|{subdir.name}]]"
                 f" · {note_count} 篇笔记 · {child_count} 个子目录"
             )
         lines.append("")

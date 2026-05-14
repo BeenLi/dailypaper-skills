@@ -1,6 +1,6 @@
 {
   "paths": {
-    "obsidian_vault": "/Users/bytedance/Documents/ob-career/001-input/PaperRead",
+    "obsidian_vault": "/Users/bytedance/Library/Mobile Documents/iCloud~md~obsidian/Documents/ob-career/001-input/PaperRead",
     "paper_notes_folder": "PaperNotes",
     "daily_papers_folder": "DailyPapers",
     "concepts_folder": "_concepts",
@@ -121,5 +121,8 @@
     "auto_refresh_indexes": true,
     "git_commit": false,
     "git_push": false
+  },
+  "mocs": {
+    "filename_prefix": "_index_"
   }
 }

@@ -15,11 +15,13 @@ Architecture:
 """
 
 import asyncio
+import importlib.util
 import json
 import re
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter
+from pathlib import Path
 from urllib.parse import quote
 
 SEMAPHORE_LIMIT = 10
@@ -124,6 +126,27 @@ async def curl_fetch(url: str, sem: asyncio.Semaphore, timeout: int = CURL_TIMEO
         if attempt < retries:
             await asyncio.sleep(3 * attempt)  # 3s, 6s
     return ""
+
+
+async def curl_fetch_bytes(url: str, sem: asyncio.Semaphore, timeout: int = CURL_TIMEOUT,
+                           retries: int = 3) -> bytes:
+    """Fetch URL content as bytes using curl subprocess with retry."""
+    for attempt in range(1, retries + 1):
+        async with sem:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "curl", "-sL", "--max-time", str(timeout), url,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout + 5)
+                if stdout:
+                    return stdout
+            except (asyncio.TimeoutError, Exception) as e:
+                print(f"  [curl-bytes] attempt {attempt}/{retries} failed {url}: {e}", file=sys.stderr)
+        if attempt < retries:
+            await asyncio.sleep(3 * attempt)
+    return b""
 
 
 
@@ -706,33 +729,59 @@ async def search_openalex_by_title(title: str, sem: asyncio.Semaphore) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 EXTRACT_AFFILIATIONS_SCRIPT = str(
-    __import__("pathlib").Path(__file__).parent / "extract_affiliations.py"
+    Path(__file__).parent / "extract_affiliations.py"
 )
+_AFFILIATION_EXTRACTOR = None
+
+
+def extract_affiliations_from_text(text: str) -> list[str]:
+    """Extract affiliation names from text produced by pdftotext."""
+    global _AFFILIATION_EXTRACTOR
+    if _AFFILIATION_EXTRACTOR is None:
+        spec = importlib.util.spec_from_file_location(
+            "daily_papers_extract_affiliations",
+            EXTRACT_AFFILIATIONS_SCRIPT,
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        _AFFILIATION_EXTRACTOR = module.extract_affiliations
+    return _AFFILIATION_EXTRACTOR(text)
+
+
+async def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+    """Convert PDF bytes to text using pdftotext without fetching network data."""
+    if not pdf_bytes:
+        return ""
+    proc = await asyncio.create_subprocess_exec(
+        "pdftotext", "-l", "2", "-", "-",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await asyncio.wait_for(
+        proc.communicate(input=pdf_bytes),
+        timeout=CURL_TIMEOUT + 15,
+    )
+    return stdout.decode("utf-8", errors="replace") if stdout else ""
+
 
 async def extract_affiliations_pdf(arxiv_id: str, sem: asyncio.Semaphore,
                                    retries: int = 3) -> list[str]:
-    """Extract affiliations from PDF via pdftotext + extract_affiliations.py."""
+    """Extract affiliations from PDF via a mockable PDF fetch layer."""
+    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
     for attempt in range(1, retries + 1):
-        async with sem:
-            try:
-                cmd = (
-                    f'curl -sL --max-time {CURL_TIMEOUT} "https://arxiv.org/pdf/{arxiv_id}"'
-                    f" | pdftotext -l 2 - -"
-                    f" | python3 {EXTRACT_AFFILIATIONS_SCRIPT}"
-                )
-                proc = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=CURL_TIMEOUT + 15)
-                if stdout:
-                    data = json.loads(stdout.decode("utf-8", errors="replace"))
-                    affils = data.get("affiliations", [])
-                    if affils:
-                        return affils
-            except (asyncio.TimeoutError, json.JSONDecodeError, Exception) as e:
-                print(f"  [pdf] attempt {attempt}/{retries} failed {arxiv_id}: {e}", file=sys.stderr)
+        try:
+            pdf_bytes = await curl_fetch_bytes(pdf_url, sem)
+            if not pdf_bytes:
+                return []
+            text = await extract_text_from_pdf_bytes(pdf_bytes)
+            if text:
+                affils = extract_affiliations_from_text(text)
+                if affils:
+                    return affils
+        except (asyncio.TimeoutError, Exception) as e:
+            print(f"  [pdf] attempt {attempt}/{retries} failed {arxiv_id}: {e}", file=sys.stderr)
         if attempt < retries:
             await asyncio.sleep(3 * attempt)
     return []

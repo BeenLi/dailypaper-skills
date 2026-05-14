@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 论文笔记自动分类工具
-根据论文 tags 和内容自动分类到对应目录，并同步更新 Zotero 分类
+根据论文 tags 和内容自动分类到对应目录；Zotero 分类默认不自动修改
 """
 
 import os
@@ -59,7 +59,7 @@ CATEGORY_RULES = {
     ],
 }
 
-# Zotero 分类 ID 映射（需要根据实际情况更新）
+# Zotero 分类 ID 映射（仅供人工确认后的显式同步操作使用）
 ZOTERO_COLLECTION_MAP = {
     "1-Computer Architecture and Accelerators": None,
     "2-Memory and Storage Systems": None,
@@ -284,12 +284,13 @@ def reorganize_notes(dry_run: bool = True):
         shutil.move(str(old_path), str(new_path))
         print(f"✓ 已移动: {old_path.name} -> {category}/")
 
-        # 更新 Zotero 分类
+        # 默认只更新 Obsidian 笔记路径和 frontmatter，不自动修改 Zotero 分类。
         zotero_collection_value = category
-        if zotero_id:
-            synced_collection = update_zotero_collection(zotero_id, category, current_collection)
-            if synced_collection:
-                zotero_collection_value = synced_collection
+        if zotero_id and current_collection and current_collection != category:
+            print(
+                f"  Zotero item {zotero_id} 当前分类为 {current_collection}；"
+                f"如需改到 {category}，请确认后使用 zotero_helper.py move/add-to-collection/remove-from-collection"
+            )
 
         # 更新 frontmatter 中的 zotero_collection
         update_frontmatter_collection(new_path, zotero_collection_value)

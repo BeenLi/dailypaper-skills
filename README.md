@@ -23,7 +23,7 @@ ObsidianVault/
 
 可直接看模板：
 
-- [Obsidian 模板](obsidian-templates/论文笔记模板.md)
+- [论文笔记主模板](skills/paper-reader/assets/paper-note-template.md)
 
 ## 🐕 怎么用
 

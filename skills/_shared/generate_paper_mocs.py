@@ -12,7 +12,7 @@ if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 
 from moc_builder import build_tree_mocs
-from user_config import obsidian_vault_path, paper_notes_dir, paths_config
+from user_config import moc_filename_prefix, obsidian_vault_path, paper_notes_dir, paths_config
 
 
 def main() -> int:
@@ -21,7 +21,8 @@ def main() -> int:
         root_dir=paper_notes_dir(),
         title_prefix="论文目录页",
         intro="用于浏览论文笔记、分类目录和子主题入口。",
-        exclude_dir_names={paths_config()["concepts_folder"]},
+        exclude_dir_names={paths_config()["concepts_folder"], "_inbox"},
+        moc_filename_prefix=moc_filename_prefix(),
     )
     print(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2))
     return 0

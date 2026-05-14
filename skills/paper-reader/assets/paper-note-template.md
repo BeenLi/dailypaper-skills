@@ -5,7 +5,10 @@ authors: [{Authors}]
 year: {Year}
 venue: {Venue}
 tags: [{tags}]
+zotero_item_id: {zotero_item_id}
 zotero_collection: {zotero_path}
+doi: {doi}
+arxiv_id: {arxiv_id}
 image_source: online  # online（默认）/ mixed / local
 arxiv_html: {arxiv_html_url}  # 如有
 created: {date}
@@ -61,6 +64,22 @@ created: {date}
 
 ---
 
+## 作者核心 Insights
+
+> 记录论文中显式提出的 Observation / Insight / Takeaway，优先保留作者自己的表述逻辑。
+
+1. **Insight 1**:
+   - **现象 / 证据**: {作者用什么实验、图或数字支持这个 insight}
+   - **设计启发**: {这个 insight 如何导向系统设计}
+2. **Insight 2**:
+   - **现象 / 证据**: {作者用什么实验、图或数字支持这个 insight}
+   - **设计启发**: {这个 insight 如何导向系统设计}
+3. **Insight 3**:
+   - **现象 / 证据**: {作者用什么实验、图或数字支持这个 insight}
+   - **设计启发**: {这个 insight 如何导向系统设计}
+
+---
+
 ## 问题定义与瓶颈
 
 ### 目标场景
@@ -79,17 +98,27 @@ created: {date}
 
 {作者为什么认为自己的设计能解决这个问题？}
 
-### 与瓶颈相关的关键图 / 公式
+---
 
-![Bottleneck / motivation](...)
+## 动机实验 / Characterization
+
+### 特征图与数字证据
+
+![Motivation / characterization](...)
 
 $$
 ...
 $$
 
-- **这张图说明什么**:
-- **这条公式解释什么**:
-- **变量含义**:
+- **这张图说明什么瓶颈或规律**:
+- **关键数字**:
+- **覆盖的 workload / 场景**:
+
+### 由实验得到的设计原则
+
+1. {设计原则1}
+2. {设计原则2}
+3. {设计原则3}
 
 ---
 
@@ -130,6 +159,12 @@ $$
 - [[{核心技术2}]]
 - [[{核心技术3}]]
 
+### 硬件改动清单
+
+| 组件 | 类型（SRAM / CAM / 逻辑 / 其他） | 容量 / 位宽 | 所在流水级 / 通路 | 额外 cycle | 面积 / 功耗估算 |
+|------|----------------------------------|-------------|-------------------|------------|-----------------|
+| {组件1} | {类型} | {容量 / 位宽} | {stage / path} | {cycle} | {area / power} |
+
 ---
 
 ## 关键机制拆解
@@ -161,6 +196,14 @@ $$
 - {要点2}
 - {要点3}
 
+#### 参数选择 / 设计空间扫描
+
+![Design space](...)
+
+- **扫描了哪些参数**: {参数范围}
+- **最终选择**: {最终参数}
+- **选择依据**: {性能、面积、复杂度或兼容性权衡}
+
 ### 机制2：{名称}
 
 #### 设计动机
@@ -188,16 +231,24 @@ $$
 - {要点2}
 - {要点3}
 
+#### 参数选择 / 设计空间扫描
+
+![Design space](...)
+
+- **扫描了哪些参数**: {参数范围}
+- **最终选择**: {最终参数}
+- **选择依据**: {性能、面积、复杂度或兼容性权衡}
+
 ---
 
 ## 实验设置
 
 ### Workload 与任务
 
-| Workload | 规模 | 特点 | 用途 |
-|----------|------|------|------|
-| {Workload1} | {size} | {特点} | 主实验 |
-| {Workload2} | {size} | {特点} | 扩展实验 |
+| Workload | 领域 | 规模 / Footprint | 关键指标（MPKI / IPC / frontend-bound 等） | 来源（suite / trace） |
+|----------|------|------------------|-------------------------------------------|-----------------------|
+| {Workload1} | {domain} | {size / footprint} | {key metrics} | {suite / trace} |
+| {Workload2} | {domain} | {size / footprint} | {key metrics} | {suite / trace} |
 
 ### Baselines
 
@@ -208,16 +259,21 @@ $$
 
 ### 评测指标
 
-- **吞吐**: {定义}
-- **延时**: {定义}
-- **资源占用**: {定义}
-- **扩展性 / 成本效率**: {定义}
+| 指标 | 公式 / 定义 | 含义 | 越大 / 越小越好 |
+|------|-------------|------|-----------------|
+| {指标1} | {公式 / 定义} | {含义} | {越大 / 越小} |
+| {指标2} | {公式 / 定义} | {含义} | {越大 / 越小} |
 
-### 实验环境
+### 模拟器与微架构参数
 
-- **硬件**: {GPU/CPU/NIC/FPGA/交换机/集群规模}
-- **软件栈**: {OS、框架、编译器、runtime、通信库}
-- **部署方式**: {单机/多机/多租户/云环境}
+| 项目 | 配置 |
+|------|------|
+| Simulator / Framework | {gem5 / ChampSim / ZSim / 真实平台等} |
+| CPU pipeline | {宽度、ROB、fetch/decode/commit 等} |
+| Branch predictor / BTB | {预测器、BTB、RAS、FTQ 等} |
+| Cache hierarchy | {L1 / L2 / LLC 配置} |
+| Memory system | {DRAM / NVM / network / storage 配置} |
+| Warmup / simulation length | {warmup 与采样长度} |
 
 ### 与实验设置强相关的图 / 公式
 
@@ -266,9 +322,23 @@ $$
 
 ![Compatibility](...)
 
-- **适用硬件 / 平台**:
+#### 适用硬件 / 平台
+
+- **目标平台**:
 - **哪些场景收益最好**:
 - **哪些场景可能退化**:
+
+#### ISA / OS / Compiler 侵入性
+
+- **是否修改 ISA / 指令编码**:
+- **是否需要 OS / runtime 支持**:
+- **是否依赖 compiler / PGO / offline pass**:
+
+#### Silicon-feasibility
+
+- **时序闭合风险**:
+- **面积 / 功耗是否可接受**:
+- **与现有微架构模块的耦合点**:
 
 ---
 

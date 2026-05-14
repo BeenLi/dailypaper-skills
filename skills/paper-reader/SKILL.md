@@ -39,11 +39,20 @@ description: |
 |----------|------|----------|
 | PDF 路径 | `/path/to/paper.pdf` | 直接 Read |
 | arXiv 链接 | `https://arxiv.org/abs/xxxx` | WebFetch |
-| Zotero 分类 | "Distributed Systems 分类的论文" | 查询数据库 → 列出 → 用户选择 |
-| Zotero 搜索 | "Zotero 里的 vLLM" | 搜索标题 → 找到 PDF |
+| Zotero item | "读一下 Zotero item 2487" | `assets/zotero_helper.py resolve --item-id 2487` |
+| Zotero 搜索 | "读一下 Zotero 里的 EBPC" | `assets/zotero_helper.py resolve --query "EBPC"` → 多候选时让用户选 item |
+| Zotero collection | "批量读 Zotero collection \"Link & Fabric Integration\"" | `assets/zotero_helper.py resolve --collection "Link & Fabric Integration" --recursive` |
 | 无 PDF | Zotero 条目无附件 | 从网上获取（见下方） |
 
 无 PDF 时优先：`arXiv HTML > arXiv PDF > DOI > WebSearch 标题`。
+
+### Zotero 读取规则
+
+- Zotero 默认只读，只用来解析论文来源、PDF、元数据和 collection 路径。
+- 单篇搜索返回多个候选 item 时，列出 `item_id / title / year / venue / collection_paths`，让用户选择。
+- 单篇 item 位于多个 collection 时，让用户选择本次保存使用的 `selected_collection_path`。
+- 批量从 collection 进入时，使用 helper 返回的 `source_collection_path`；递归父 collection 时，优先使用 item 在该 subtree 下最具体的 child collection。
+- 如果 Zotero 分类明显不对，只提出建议；确认后才调用 `zotero_helper.py move`、`add-to-collection` 或 `remove-from-collection`。
 
 ## 2. 阅读模式
 
@@ -82,16 +91,14 @@ description: |
 
 ### 保存路径
 
-按 Zotero 分类层级：`{NOTES_PATH}/{zotero_collection_path}/{方法名}.md`
+按选定 Zotero collection 层级保存：`{NOTES_PATH}/{selected_collection_path}/{MethodName}.md`
 
-默认一级目录应落在以下骨架下：
+collection path 每一段只做文件名安全清洗，不改变 Zotero 原有层级语义。没有 collection 的 item 保存到 `{NOTES_PATH}/_inbox/{MethodName}.md`。
 
-- `1-Computer Architecture and Accelerators`
-- `2-Memory and Storage Systems`
-- `3-Networking and Interconnects`
-- `4-Distributed Systems`
-- `5-Compilers and Runtime Systems`
-- `6-Performance, Evaluation and Benchmarking`
+一篇论文默认一份笔记：
+
+- 单篇显式读取：同路径已有笔记时允许覆盖或更新；同名笔记已在别处时，移动到目标 collection 路径并更新 frontmatter。
+- 批量从 collection 进入时：默认跳过已有 notes，不按关键词重新分类。
 
 ### YAML frontmatter
 
@@ -103,7 +110,10 @@ authors: [Author1, Author2]
 year: 2025
 venue: EuroSys
 tags: [llm-serving, distributed-systems, scheduling]
-zotero_collection: 4-Distributed Systems
+zotero_item_id: 2487
+zotero_collection: Research Topics/Lossless Communication Compression/Link & Fabric Integration
+doi: 10.1145/example
+arxiv_id: 2501.01234
 image_source: online
 created: YYYY-MM-DD
 ---
@@ -138,7 +148,7 @@ created: YYYY-MM-DD
 
 ## 7. 批量处理
 
-支持 Zotero 分类批量处理（默认递归子分类）。流程：递归获取论文 → 去重 → 跳过已有笔记 → 逐篇处理 → 汇总。
+支持 Zotero collection 批量处理（默认递归子 collection）。流程：递归获取论文 → 去重 → 用 `source_collection_path` 规划保存路径 → 跳过已有笔记 → 逐篇处理 → 汇总。
 
 ## 参考文件
 

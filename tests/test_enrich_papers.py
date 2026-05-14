@@ -45,6 +45,8 @@ class EnrichPapersTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(self.module, "search_arxiv_by_title", AsyncMock(return_value=arxiv_match)), \
              patch.object(self.module, "curl_fetch", AsyncMock(return_value="")), \
+             patch.object(self.module, "curl_fetch_bytes", AsyncMock(return_value=b""), create=True), \
+             patch.object(self.module.asyncio, "create_subprocess_shell", side_effect=AssertionError("shell curl should not be used")), \
              patch.object(self.module, "search_semantic_scholar_by_title", AsyncMock(return_value={})), \
              patch.object(self.module, "fetch_doi_landing_metadata", AsyncMock(return_value={})):
             enriched = await self.module.enrich_one(paper, self.module.asyncio.Semaphore(1))
@@ -54,6 +56,22 @@ class EnrichPapersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enriched["pdf"], "https://arxiv.org/pdf/2501.12345")
         self.assertEqual(enriched["authors"], "A. Author, B. Author")
         self.assertEqual(enriched["affiliations"], "Example University")
+
+    async def test_extract_affiliations_pdf_uses_mockable_binary_fetch_layer(self):
+        with patch.object(self.module, "curl_fetch_bytes", AsyncMock(return_value=b"%PDF mocked"), create=True) as fetch_pdf, \
+             patch.object(self.module, "extract_text_from_pdf_bytes", AsyncMock(return_value="mocked text"), create=True) as extract_text, \
+             patch.object(self.module, "extract_affiliations_from_text", return_value=["Example University"], create=True) as extract_affiliations, \
+             patch.object(self.module.asyncio, "create_subprocess_shell", side_effect=AssertionError("shell curl should not be used")):
+            affiliations = await self.module.extract_affiliations_pdf(
+                "2501.12345",
+                self.module.asyncio.Semaphore(1),
+                retries=1,
+            )
+
+        self.assertEqual(affiliations, ["Example University"])
+        fetch_pdf.assert_awaited_once()
+        extract_text.assert_awaited_once_with(b"%PDF mocked")
+        extract_affiliations.assert_called_once_with("mocked text")
 
     async def test_semantic_scholar_fallback_populates_abstract_and_method_summary(self):
         paper = {
@@ -249,6 +267,8 @@ class EnrichPapersTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(self.module, "search_arxiv_by_title", AsyncMock(return_value=arxiv_match)), \
              patch.object(self.module, "curl_fetch", AsyncMock(side_effect=fake_curl_fetch)), \
+             patch.object(self.module, "curl_fetch_bytes", AsyncMock(return_value=b""), create=True), \
+             patch.object(self.module.asyncio, "create_subprocess_shell", side_effect=AssertionError("shell curl should not be used")), \
              patch.object(self.module, "fetch_doi_metadata", AsyncMock(return_value={})), \
              patch.object(self.module, "search_semantic_scholar_by_doi", AsyncMock(return_value={})), \
              patch.object(self.module, "search_semantic_scholar_by_title", AsyncMock(return_value={})), \
