@@ -65,7 +65,7 @@ description: |
 **1c: 创建缺失的概念笔记（自动归类）**
 检查 `{CONCEPTS_PATH}/` 下是否已存在（搜索所有子目录）。对于缺失的概念，**根据概念类型自动归类到对应子目录**，不要全扔 `0-uncategorized/`。
 
-分类规则见 `../paper-reader/references/concept-categories.md`
+分类规则和**增强模板**见 `../paper-reader/references/concept-categories.md`。每篇 concept 必须按增强模板生成：含「动机与痛点 / 直观例子 / 边界与对比 / 学习索引」4 个新必选段 + 按 `concept_type` 加的差异化段。长度目标 60-100 行；`学习索引` 找不到证据时允许整段写 `TODO`，禁止凭空编造。
 
 概念笔记模板见 `../paper-reader/references/concept-categories.md`
 

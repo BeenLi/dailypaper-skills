@@ -77,7 +77,9 @@
 | metric | MPKI, IPC, Bandwidth Utilization, Effective FLOPs, Goodput, p99 |
 | theory-model | Amdahl's Law, Gustafson's Law, Little's Law, USL Model |
 
-## 概念笔记模板
+## 概念笔记模板（增强版）
+
+每篇 concept 笔记由 **8 个统一段** + **1 个按 concept_type 加的差异化段** 组成。长度目标 **60-100 行**(超过 120 行说明在凑长度,请收敛)。
 
 ```markdown
 ---
@@ -90,21 +92,53 @@ tags: [status/paper-specific]  # 仅在 paper-specific 时加
 # 概念名称
 
 ## 定义
-一句话定义
+一句话定义。只解释 what,不解释 why。
 
-## 数学形式 / 系统模型
-$$公式$$
+## 动机与痛点
+为什么会出现这个 concept?它在解决什么瓶颈或抽象漏洞?跟它之前人们怎么做相比,核心改进是什么?
+
+## 直观例子
+用 1 个具体场景把 concept "走一遍"。可以是 mini walk-through(算一个小例子)、伪代码、ASCII 状态图、或 Mermaid。目标:读者读完此段能说出"哦,它是 X 样子的"。
 
 ## 核心要点
-1. ...
-2. ...
+3-5 条,每条用一两句解释**原理**,不只是 fact 列表。
 
-## 代表工作
-- [[Paper1]]: ...
+<!-- 按 concept_type 加差异化段,见下面 §按 concept_type 差异化段 -->
+
+## 边界与对比
+- 什么情况**不**适用 / 反模式
+- 跟最容易混淆的近邻 concept 的关键差别(用 1-2 个 `[[xxx]]` 对比)
+
+## 代表工作与具体用法
+- [[Paper1]]: 它怎么使用这个 concept?用出了什么效果(具体数字 / 设计决策)?
+- [[Paper2]]: 同上
 
 ## 相关概念
-- [[相关概念1]]
+- [[concept1]]: 和本概念的**关系**(组成 / 替代 / 协作 / 前置)
+- [[concept2]]: 同上
+
+## 学习索引
+- 入门 paper / 综述:1-2 个(必须有具体 URL 或论文标题,不要凭印象列)
+- 经典 blog / 教科书章节:1-2 个(必须有 URL)
+- 关键 GitHub 实现(可选)
+
+> 学习索引段允许整段写 `TODO: 待人工补充学习材料`,不要硬凑虚构内容。
 ```
+
+## 按 concept_type 差异化段(必加)
+
+放在 `## 核心要点` 之后、`## 边界与对比` 之前。8 个 concept_type 对应的差异化段如下:
+
+| concept_type | 差异化段名 | 内容要点 |
+|---|---|---|
+| `data-structure` | `## 内存视图 / 字段布局` | 字段分布、字节大小、对齐、布局图 |
+| `algorithm` | `## 步骤` + `## 复杂度` | 伪代码 / 步骤列表;时空复杂度;典型变体 |
+| `mechanism` | `## 状态与触发条件` + `## 关键参数` | 触发条件、状态转移、可调参数 |
+| `architecture` | `## 组件与接口` | **必须** Mermaid `flowchart LR` 画组件图(遵守 `~/.claude/skills/mermaid-rules/SKILL.md`:label 引号包裹、节点 ID 语义化、配色 ≤5);不允许 ASCII 状态图替代;描述接口契约;生成后用 `mmdc -i x.mmd -o x.png` 或 https://mermaid.live 校验 |
+| `hardware` | `## 接口与典型参数` | 指令 / API 接口、峰值算力 / 带宽、典型规格、演进史 |
+| `software-abstraction` | `## API 与生命周期` | 关键 API 签名、初始化-使用-销毁的生命周期 |
+| `metric` | `## 测量方法` | 怎么测、单位、典型范围、好 / 坏阈值参考 |
+| `theory-model` | `## 假设与失效边界` | 模型假设、适用域、什么时候失效 |
 
 ## 与论文笔记目录的关系
 

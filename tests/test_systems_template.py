@@ -149,6 +149,61 @@ class SystemsTemplateTests(unittest.TestCase):
         self.assertIn("Admission Control", combined)
         self.assertIn("Kernel Fusion", combined)
 
+    def test_concept_reference_uses_enhanced_template_with_required_sections(self):
+        text = CONCEPT_CATEGORIES.read_text(encoding="utf-8")
+
+        # 4 个新必选段必须在 reference 里出现
+        for section in ["## 动机与痛点", "## 直观例子", "## 边界与对比", "## 学习索引"]:
+            self.assertIn(section, text)
+
+        # 长度目标
+        self.assertIn("60-100 行", text)
+
+        # 学习索引允许整段写 TODO 的硬规则
+        self.assertIn("TODO: 待人工补充学习材料", text)
+
+    def test_concept_reference_lists_per_type_differentiation_sections(self):
+        text = CONCEPT_CATEGORIES.read_text(encoding="utf-8")
+
+        # 8 类各自的差异化段都要在 reference 里列出
+        differentiation_sections = [
+            "## 内存视图 / 字段布局",           # data-structure
+            "## 步骤",                          # algorithm
+            "## 复杂度",                        # algorithm
+            "## 状态与触发条件",                # mechanism
+            "## 关键参数",                      # mechanism
+            "## 组件与接口",                    # architecture
+            "## 接口与典型参数",                # hardware
+            "## API 与生命周期",                # software-abstraction
+            "## 测量方法",                      # metric
+            "## 假设与失效边界",                # theory-model
+        ]
+        for section in differentiation_sections:
+            self.assertIn(section, text)
+
+        # architecture 类必须用 Mermaid,不允许 ASCII 替代
+        self.assertIn("不允许 ASCII", text)
+        self.assertIn("Mermaid", text)
+
+    def test_enhanced_template_propagated_to_paper_daemon_and_daily_notes(self):
+        paper_reader = PAPER_READER_SKILL.read_text(encoding="utf-8")
+        daily_notes = DAILY_PAPERS_NOTES_SKILL.read_text(encoding="utf-8")
+        daemon = PAPER_DAEMON.read_text(encoding="utf-8")
+
+        # 三处都要提到增强模板和 4 个必选段;daemon 自带模板示例
+        for blob, name in [
+            (paper_reader, "paper-reader SKILL.md"),
+            (daily_notes, "daily-papers-notes SKILL.md"),
+            (daemon, "paper_daemon.py"),
+        ]:
+            for keyword in ["动机与痛点", "直观例子", "边界与对比", "学习索引"]:
+                self.assertIn(keyword, blob, f"{name} 缺少关键词 {keyword}")
+
+        # 三处都要明确长度目标
+        self.assertIn("60-100 行", paper_reader)
+        self.assertIn("60-100 行", daily_notes)
+        self.assertIn("60-100 行", daemon)
+
     def test_paper_reader_zotero_workflow_is_readonly_and_collection_path_based(self):
         text = PAPER_READER_SKILL.read_text(encoding="utf-8")
         asset_text = ASSET_TEMPLATE.read_text(encoding="utf-8")

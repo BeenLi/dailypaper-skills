@@ -133,6 +133,8 @@ created: YYYY-MM-DD
 2. 在 `{CONCEPTS_PATH}` 下**递归**查找是否已存在（不要只看顶层）
 3. 不存在的按 `references/concept-categories.md` 的 8 类 `concept_type` 归类后创建
 
+新建 concept 必须按 `references/concept-categories.md` 的**增强模板**生成：含「动机与痛点 / 直观例子 / 边界与对比 / 学习索引」4 个新必选段，加上按 `concept_type` 加的差异化段（如 architecture 必须含 Mermaid 组件图、algorithm 必须含步骤+复杂度等）。长度目标 60-100 行。`学习索引` 找不到证据时允许整段写 `TODO`，不要硬凑。
+
 概念按性质分类（`data-structure / algorithm / mechanism / architecture / hardware / software-abstraction / metric / theory-model`），**不**按论文研究领域分类。仅被本论文使用的方法名优先折回论文笔记，不独立成 concept（详见 `references/concept-categories.md`）。
 
 过滤默认规则：
