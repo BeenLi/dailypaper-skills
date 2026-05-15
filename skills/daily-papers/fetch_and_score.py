@@ -14,11 +14,13 @@ import argparse
 import json
 import re
 import sys
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from html import unescape
 from pathlib import Path
 from urllib.parse import quote
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 _SHARED_DIR = Path(__file__).resolve().parent.parent / "_shared"
@@ -121,14 +123,35 @@ def score_paper(paper: dict) -> int:
     return score
 
 
-def fetch_url(url: str, timeout: int = 30) -> str:
-    try:
-        req = Request(url, headers={"User-Agent": "daily-papers-bot/2.0"})
-        with urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8", errors="replace")
-    except Exception as exc:
-        print(f"  [WARN] fetch failed {url}: {exc}", file=sys.stderr)
-        return ""
+def retry_delay_from_headers(exc: HTTPError, attempt: int) -> int:
+    retry_after = exc.headers.get("Retry-After") if exc.headers else None
+    if retry_after and retry_after.isdigit():
+        return min(int(retry_after), 60)
+    return min(5 * (2 ** attempt), 60)
+
+
+def fetch_url(url: str, timeout: int = 30, retries: int = 2) -> str:
+    retry_statuses = {429, 500, 502, 503, 504}
+    for attempt in range(retries + 1):
+        try:
+            req = Request(url, headers={"User-Agent": "daily-papers-bot/2.0"})
+            with urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            if exc.code in retry_statuses and attempt < retries:
+                delay = retry_delay_from_headers(exc, attempt)
+                print(
+                    f"  [WARN] fetch failed {url}: HTTP {exc.code}; retrying in {delay}s",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+                continue
+            print(f"  [WARN] fetch failed {url}: {exc}", file=sys.stderr)
+            return ""
+        except Exception as exc:
+            print(f"  [WARN] fetch failed {url}: {exc}", file=sys.stderr)
+            return ""
+    return ""
 
 
 def make_base_paper(title: str, authors: str = "", abstract: str = "", url: str = "", **extra) -> dict:

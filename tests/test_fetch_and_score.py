@@ -2,6 +2,8 @@ import importlib.util
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
+from urllib.error import HTTPError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -190,6 +192,40 @@ class FetchAndScoreTests(unittest.TestCase):
         dblp_count = sum(1 for p in top if p["source"] == "dblp")
         self.assertLessEqual(dblp_count, 4)
         self.assertEqual(len(top), 10)
+
+    def test_fetch_url_retries_transient_rate_limit(self):
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"<feed />"
+
+        attempts = []
+
+        def fake_urlopen(req, timeout):
+            attempts.append(req.full_url)
+            if len(attempts) == 1:
+                raise HTTPError(
+                    req.full_url,
+                    429,
+                    "Too Many Requests",
+                    {"Retry-After": "0"},
+                    None,
+                )
+            return FakeResponse()
+
+        with patch.object(self.module, "urlopen", side_effect=fake_urlopen), patch("time.sleep") as sleep:
+            body = self.module.fetch_url("https://export.arxiv.org/api/query", timeout=1)
+
+        self.assertEqual(body, "<feed />")
+        self.assertEqual(len(attempts), 2)
+        sleep.assert_called_once_with(0)
 
 
 if __name__ == "__main__":
