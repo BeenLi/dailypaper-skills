@@ -1,40 +1,43 @@
 # dailypaper-skills
 
-我平时读 `computer architecture / networking / distributed systems / LLM systems` 论文用的一套 Codex skills。直接跟 Codex 说一句话，就能筛论文、读论文、写笔记，最后自动存进 Obsidian。
+面向 `computer architecture / networking / distributed systems / LLM systems` 的 Codex skills 集合。目标是把论文发现、论文阅读、Zotero 文献库和 Obsidian 笔记库连成一条可维护的本地工作流。
 
-> 📺 [论文流水线效果演示（旧视频）](http://xhslink.com/o/1dhQCn40EWY) — 展示的是同一套工作流的早期版本
+> 📺 [论文流水线效果演示（旧视频）](http://xhslink.com/o/1dhQCn40EWY) — 展示的是同一套工作流的早期版本。
 
-## 🦴 这套东西会帮我做什么
+## 这个仓库解决什么问题
 
-- 每天抓一批新论文，做一轮初筛，生成推荐列表。
-- 对单篇论文做完整解析、快速摘要或批判性分析。
-- 把论文里的术语顺手沉成概念笔记，方便后面继续连。
-- 把内容写进 Obsidian，顺带维护目录页 / 导航页。
-- 能接 Zotero，所以不用一篇篇复制链接。
+- 每天抓取 systems / LLM infra 相关论文，生成带判断的推荐列表。
+- 对单篇论文生成 Obsidian 兼容的 Markdown 笔记。
+- 从 Zotero 读取论文、PDF、元数据和 collection path，并按 Zotero collection 层级保存笔记。
+- 自动维护概念库：用 `[[wikilink]]` 连接论文与概念，并按 concept type 归类。
+- 生成 / 刷新论文目录页和概念目录页。
 
-最终生成结果在 Obsidian 里大概会长这样：
+输出结构大致如下：
 
 ```text
 ObsidianVault/
-├── DailyPapers/YYYY-MM-DD-论文推荐.md
-├── PaperNotes/.../*.md
-└── PaperNotes/_concepts/.../*.md
+├── DailyPapers/
+│   ├── YYYY-MM-DD-论文推荐.md
+│   └── .history.json
+└── PaperNotes/
+    ├── Research Topics/.../{MethodName}.md
+    ├── _concepts/{concept_type}/{ConceptName}.md
+    ├── _inbox/{MethodName}.md
+    └── _index_*.md
 ```
 
-可直接看模板：
+核心模板：[`skills/paper-reader/assets/paper-note-template.md`](skills/paper-reader/assets/paper-note-template.md)
 
-- [论文笔记主模板](skills/paper-reader/assets/paper-note-template.md)
+## 快速使用
 
-## 🐕 怎么用
-
-基本就 2 句：
+最常用的入口只有两个：
 
 ```text
 今日论文推荐
 读一下这篇论文 https://arxiv.org/abs/2509.24527
 ```
 
-其他常见说法：
+常见变体：
 
 ```text
 过去3天论文推荐
@@ -45,143 +48,248 @@ ObsidianVault/
 批判性分析这篇论文 ~/Downloads/paper.pdf
 
 读一下 Zotero 里的 vLLM
-批量读一下 Zotero 里 Distributed Systems 分类下的论文
-```
+读一下 Zotero item 2487
+批量读一下 Zotero 里 Link & Fabric Integration 分类下的论文
 
-`今日论文推荐` 会跑完整流程，`读一下这篇论文 ...` 用来读单篇。
-
-目录页一般会自动更新；如果你手动改过结构，或者怀疑没同步，再补一句：
-
-```text
 更新索引
 ```
 
-## 🏡 安装
+`今日论文推荐` 默认只做“抓取 + 点评”，**不会自动精读生成论文笔记**。如果某篇值得细看，再运行 `读一下 论文标题` 或 `跑一下论文笔记`。
+
+## 安装
 
 前置环境：
 
 - Codex CLI
-- [Obsidian](https://obsidian.md/)
-- [Python 3.8+](https://www.python.org/)
-- [`poppler-utils`](https://poppler.freedesktop.org/)（`apt install poppler-utils` / `brew install poppler`）
-- [Zotero](https://www.zotero.org/)（可选）
+- Obsidian
+- Python 3.10+（推荐 3.13，本仓库测试使用 Python 3.13）
+- `poppler` / `poppler-utils`（提供 `pdftotext`、`pdfimages`）
+- Zotero（可选，但推荐）
+- `mmdc`（可选，用于校验 Mermaid 图）
 
-建议给 Obsidian 库加上 git 版本管理。笔记多了以后有个版本历史会安心很多，也方便多设备同步。
-
-如果你是在自己的本地机器上日常使用，通常直接用 `codex --full-auto` 会顺手很多；如果你明确已经在外部沙箱里，也可以用 `codex --dangerously-bypass-approvals-and-sandbox`，但风险更高，不建议在不熟悉的机器上直接这么跑。
-
-在仓库根目录运行：
+安装 skills：
 
 ```bash
 mkdir -p ~/.codex/skills
-cp -r ./skills/* ~/.codex/skills/
+cp -R ./skills/* ~/.codex/skills/
+```
 
-# 改成你自己的 Obsidian 库路径，要跟配置文件里的 paths.obsidian_vault 一致
+如果你是在本仓库内持续开发，也可以用软链接，避免每次修改后重复复制：
+
+```bash
+mkdir -p ~/.codex/skills
+ln -sfn "$PWD/skills/paper-reader" ~/.codex/skills/paper-reader
+ln -sfn "$PWD/skills/daily-papers" ~/.codex/skills/daily-papers
+ln -sfn "$PWD/skills/daily-papers-fetch" ~/.codex/skills/daily-papers-fetch
+ln -sfn "$PWD/skills/daily-papers-review" ~/.codex/skills/daily-papers-review
+ln -sfn "$PWD/skills/daily-papers-notes" ~/.codex/skills/daily-papers-notes
+ln -sfn "$PWD/skills/generate-mocs" ~/.codex/skills/generate-mocs
+ln -sfn "$PWD/skills/_shared" ~/.codex/skills/_shared
+```
+
+初始化 Obsidian 目录：
+
+```bash
 VAULT=~/ObsidianVault
 mkdir -p "$VAULT/DailyPapers" \
-  "$VAULT/PaperNotes/_concepts/0-uncategorized" \
+  "$VAULT/PaperNotes/_concepts" \
   "$VAULT/PaperNotes/_inbox"
 ```
 
-## ⚙️ 配置
+## 配置
 
-安装完之后需要改一下配置。配置文件是 `~/.codex/skills/_shared/user-config.json`，可以自己改，也可以直接让 Codex 按你的需求帮你改。
-
-里面主要改这几项：
-
-| 配置项 | 说明 |
-| --- | --- |
-| `paths.obsidian_vault` | 你的 Obsidian 库在哪 |
-| `paths.zotero_db` | Zotero 数据库路径（不用 Zotero 可以不填） |
-| `paths.zotero_storage` | Zotero 附件存储路径 |
-| `daily_papers.keywords` | 你关心的研究方向，用来给论文打分 |
-| `daily_papers.negative_keywords` | 你不想看的方向，命中直接排除 |
-| `daily_papers.domain_boost_keywords` | 额外加分的领域词 |
-
-`批量读一下 Zotero 里 XXX 分类下的论文` 不需要额外的映射文件；只要 `paths.zotero_db` 和 `paths.zotero_storage` 配对，脚本会直接从你的 Zotero 分类树里查。
-
-## 🦮 默认行为
-
-默认 Obsidian 库管理不会自动commit、push：
-
-- `auto_refresh_indexes = true`
-- `git_commit = false`
-- `git_push = false`
-
-也就是默认会自动刷新目录页，但不会动你的 git。如果你的 Obsidian 库已经用 git 管理，希望跑完流程后自动提交，把 `git_commit` 打开就行。
-
-## 🐾 大概怎么跑的
-
-**每日推荐**拆成三步流水线，避免单次上下文太长：
-
-1. **抓取**：Python 脚本优先抓取 DBLP proceedings / journal pages、最近会议 program pages，再补 arXiv API；按你配的 systems 关键词打分、去重，输出 top 30 候选到 `/tmp`。然后异步抓 arXiv 页面补全作者、机构、图片等元数据。
-2. **点评**：Codex 读候选列表，按 必读 / 值得看 / 可跳过 分流，写锐评，保存到 Obsidian 的 `DailyPapers/` 目录，同时更新 `.history.json` 做跨天去重。
-3. **笔记**：对"必读"论文逐篇调 paper-reader 生成完整笔记（公式、图表、关键方法），顺便补概念库，最后回填链接、刷新目录页。
-
-**读单篇**走 paper-reader：支持 arXiv 链接、本地 PDF、Zotero 搜索。会从 arXiv HTML / 项目主页 / PDF 多路取图，按模板生成结构化笔记，自动归类到 `Architecture / Memory / Networking / Distributed / Runtime / Benchmarking` 等目录。
-
-**目录页**由 `generate-mocs` 维护：递归扫描论文笔记和概念库目录，自动生成带 wikilink 的索引页。
-
-更多实现细节见 [ARCHITECTURE.md](ARCHITECTURE.md)。
-
-## 🏠 仓库里有什么
-
-平时真正常用的是前 2 个，后 1 个偏维护：
-
-- `daily-papers`：每日推荐全流程
-- `paper-reader`：读单篇论文
-- `generate-mocs`：手动补刷目录页
-
-另外还有 3 个内部 skill，主要给调试和重跑单步用：
-
-- `daily-papers-fetch`
-- `daily-papers-review`
-- `daily-papers-notes`
-
-## 🎾 进阶用法
-
-如果你只想单独跑流水线某一步，也可以分别说：
+共享配置位于：
 
 ```text
-跑一下论文抓取
-跑一下论文点评
-跑一下论文笔记
+~/.codex/skills/_shared/user-config.json
 ```
 
-如果你想做本地定时任务（比如每天早上 6 点自动运行），可以直接让 Codex 按你的系统环境帮你配置。
+建议不要直接改默认模板，而是在同目录创建 `user-config.local.json` 覆盖个人路径和关键词。加载顺序是：
 
-## 🐶 FAQ
+1. `user-config.py` 内置默认值
+2. `user-config.json`
+3. `user-config.local.json`
 
-**可以一步跑完整流程吗？**
+核心配置项：
 
-可以。直接说 `今日论文推荐` 就行。内部拆成三步主要是为了避免单次上下文过长，同时方便单步调试和重跑。
+| 配置项 | 说明 |
+|---|---|
+| `paths.obsidian_vault` | Obsidian vault 根路径 |
+| `paths.paper_notes_folder` | 论文笔记目录名，默认 `PaperNotes` |
+| `paths.daily_papers_folder` | 每日推荐目录名，默认 `DailyPapers` |
+| `paths.concepts_folder` | 概念库目录名，默认 `_concepts` |
+| `paths.zotero_db` | Zotero `zotero.sqlite` 路径 |
+| `paths.zotero_storage` | Zotero 附件目录 |
+| `daily_papers.keywords` | 论文打分主关键词 |
+| `daily_papers.negative_keywords` | 命中后直接排除的方向 |
+| `daily_papers.domain_boost_keywords` | systems 相关性加分词 |
+| `daily_papers.arxiv_categories` | arXiv API 查询分类 |
+| `daily_papers.min_score` | 候选最低分 |
+| `daily_papers.top_n` | 单日候选上限 |
+| `automation.auto_refresh_indexes` | 是否自动刷新 MOC |
+| `automation.git_commit` | 是否自动 commit Obsidian vault |
+| `automation.git_push` | 是否自动 push，只有 `git_commit=true` 时才生效 |
+| `mocs.filename_prefix` | MOC 文件名前缀，当前推荐 `_index_` |
 
-**目录页会自动刷新吗？**
+## 核心工作流
 
-默认会。读单篇论文和跑完整的每日推荐流程时，结束后通常都会自动刷新一次。`更新索引` 更像是手动补刷入口。
+### 每日论文推荐
+
+`daily-papers` 是面向用户的一句话入口。内部自动串联：
+
+1. `daily-papers-fetch`
+   - 抓 DBLP proceedings / journal pages、会议 program pages、arXiv API。
+   - 候选不足时补 Semantic Scholar。
+   - 按配置关键词打分、去重、历史过滤。
+   - 输出 `/tmp/daily_papers_top30.json` 和 `/tmp/daily_papers_enriched.json`。
+2. `daily-papers-review`
+   - 读取富化后的候选。
+   - 按主推 / 备选 / 可跳过分流。
+   - 保存 `{DailyPapers}/YYYY-MM-DD-论文推荐.md`。
+   - 更新 `.history.json` 做 30 天去重。
+
+默认不执行 `daily-papers-notes`，避免一次推荐直接生成大量长笔记。
+
+### 单篇论文阅读
+
+`paper-reader` 支持：
+
+- 本地 PDF
+- arXiv 链接
+- DOI / 网页链接
+- Zotero item
+- Zotero 搜索
+- Zotero collection 批量处理
+
+保存规则：
+
+- 文件名使用主方法名 / 系统名：`{MethodName}.md`
+- 有 Zotero collection 时保存到 `{PaperNotes}/{selected_collection_path}/{MethodName}.md`
+- 没有 collection 时保存到 `{PaperNotes}/_inbox/{MethodName}.md`
+- `zotero_item_id`、`doi`、`arxiv_id` 写入 frontmatter，用于后续精确去重
+- 批量模式默认跳过已有笔记，避免重新分类或误移动
+
+Zotero 默认只读。系统只读取论文、PDF、元数据和 collection path；如果发现分类不合理，只给建议，不主动修改 Zotero 数据库。
+
+### 概念库
+
+概念笔记放在 `{PaperNotes}/_concepts/` 下，按概念本身性质归为 8 类：
+
+| concept_type | 示例 |
+|---|---|
+| `data-structure` | `KV Cache`, `BFloat16`, `Bloom Filter` |
+| `algorithm` | `AllReduce`, `Huffman Coding`, `Raft` |
+| `mechanism` | `PagedAttention`, `Kernel Fusion`, `Continuous Batching` |
+| `architecture` | `LLM Serving`, `Parameter Server` |
+| `hardware` | `Tensor Core`, `RDMA`, `NVLink`, `HBM` |
+| `software-abstraction` | `CUDA`, `NCCL`, `MPI`, `vLLM Engine` |
+| `metric` | `TTFT`, `SLO`, `MPKI`, `Goodput` |
+| `theory-model` | `Roofline Model`, `Amdahl's Law`, `Little's Law` |
+
+规则来源：[`skills/paper-reader/references/concept-categories.md`](skills/paper-reader/references/concept-categories.md)
+
+离线扫描缺失概念：
+
+```bash
+python3 skills/_shared/scan_missing_concepts.py --dry-run
+python3 skills/_shared/scan_missing_concepts.py --with-seed --output /tmp/missing_concepts.csv
+```
+
+扫描逻辑会排除 `_concepts/`、`_inbox/`、`_index_*.md`，并排除论文笔记之间的互链，避免把论文标题误报成 missing concept。
+
+### 目录页
+
+`generate-mocs` 调用两个共享脚本：
+
+```bash
+python3 skills/_shared/generate_concept_mocs.py
+python3 skills/_shared/generate_paper_mocs.py
+```
+
+脚本递归扫描目录，生成 `_index_*.md` 目录页。重复运行应保持幂等。
+
+## 仓库结构
+
+```text
+skills/
+├── daily-papers/          # 每日推荐编排入口
+├── daily-papers-fetch/    # 抓取与富化说明
+├── daily-papers-review/   # 推荐点评说明
+├── daily-papers-notes/    # 可选批量精读与链接回填
+├── generate-mocs/         # 手动刷新目录页入口
+├── paper-reader/          # 单篇 / Zotero 论文阅读主 skill
+│   ├── assets/
+│   │   ├── paper-note-template.md
+│   │   ├── zotero_helper.py
+│   │   └── reorganize_notes.py
+│   └── references/
+│       ├── concept-categories.md
+│       ├── image-troubleshooting.md
+│       ├── quality-standards.md
+│       └── zotero-guide.md
+└── _shared/
+    ├── user_config.py
+    ├── user-config.json
+    ├── generate_concept_mocs.py
+    ├── generate_paper_mocs.py
+    ├── moc_builder.py
+    └── scan_missing_concepts.py
+```
+
+测试：
+
+```bash
+pytest tests/
+```
+
+## 常用维护命令
+
+```bash
+# 跑全量测试
+pytest tests/
+
+# 检查每日候选抓取
+python3 skills/daily-papers/fetch_and_score.py > /tmp/daily_papers_top30.json
+cat /tmp/daily_papers_top30.json | python3 skills/daily-papers/enrich_papers.py /tmp/daily_papers_enriched.json
+
+# 扫缺失概念
+python3 skills/_shared/scan_missing_concepts.py --dry-run
+
+# 刷新 MOC
+python3 skills/_shared/generate_concept_mocs.py
+python3 skills/_shared/generate_paper_mocs.py
+```
+
+## FAQ
+
+**今日论文推荐会自动生成精读笔记吗？**
+
+不会。默认只生成推荐文件。精读需要用户显式运行 `读一下 论文标题` 或 `跑一下论文笔记`。
+
+**为什么用 Zotero collection path 保存笔记？**
+
+Zotero 是文献来源的权威组织结构。按 collection path 落盘可以避免用关键词猜分类，也能让 Obsidian 目录和 Zotero 目录保持一致。
+
+**如果一篇论文已经有笔记，怎么判断重复？**
+
+优先用 frontmatter 中的 `zotero_item_id`、`doi`、`arxiv_id` 精确匹配，再退到规范化标题 / 方法名匹配。批量模式默认跳过已有笔记。
 
 **不用 Zotero 可以吗？**
 
-可以。每日推荐不依赖 Zotero，单篇阅读也支持直接输入 arXiv 链接或本地 PDF。Zotero 主要用于已有文献库的搜索、归类和批量处理。
+可以。每日推荐不依赖 Zotero；单篇阅读也支持 arXiv 链接和本地 PDF。Zotero 只用于本地文献库检索、PDF 定位和 collection path。
 
 **不用 Obsidian 可以吗？**
 
-可以。输出本质上是 Markdown 文件，不强绑 Obsidian；只是如果你希望使用 `[[双向链接]]`、图谱和目录页索引，Obsidian 会更顺手。
+可以。输出本质是 Markdown 文件；只是 `[[wikilink]]`、目录页和图谱在 Obsidian 里更好用。
 
-**可以用来辅助论文写作吗？**
+**默认会动 git 吗？**
 
-可以，比较适合用来整理 related work、维护笔记库和生成阅读提纲。AI 生成的内容建议自己核验后再使用。
+不会。`git_commit` 和 `git_push` 默认关闭。
 
-**默认会动我的 git 仓库吗？**
+## 免责声明
 
-不会。`commit / push` 默认关闭，只有你自己打开配置后才会执行。
-
-## ⚠️ 免责声明
-
-这是我个人研究工作流的开源整理。AI 生成的推荐、点评和笔记可能有事实错误或遗漏，所以更适合作为辅助工具，而不是直接替代你的研究判断。
-
-另外，这套东西难免会有 bug，平台和环境适配问题也很正常；如果你遇到小问题，最省事的办法通常就是直接让 AI 帮你一起改。
+这是个人研究工作流的开源整理。AI 生成的推荐、点评和笔记可能有事实错误或遗漏，应作为阅读辅助而不是研究判断的替代品。
 
 ## License
 
-Apache-2.0. See `LICENSE`.
+Apache-2.0. See [`LICENSE`](LICENSE).
