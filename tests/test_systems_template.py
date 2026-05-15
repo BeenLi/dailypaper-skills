@@ -11,6 +11,7 @@ DAILY_PAPERS_NOTES_SKILL = REPO_ROOT / "skills" / "daily-papers-notes" / "SKILL.
 README = REPO_ROOT / "README.md"
 PAPER_DAEMON = REPO_ROOT / "skills" / "paper-reader" / "paper_daemon.py"
 QUALITY_STANDARDS = REPO_ROOT / "skills" / "paper-reader" / "references" / "quality-standards.md"
+CONCEPT_CATEGORIES = REPO_ROOT / "skills" / "paper-reader" / "references" / "concept-categories.md"
 
 
 def assert_table_header(testcase, text, columns):
@@ -110,6 +111,43 @@ class SystemsTemplateTests(unittest.TestCase):
         self.assertIn("baseline 是否公平", text)
         self.assertIn("实验设置", text)
         self.assertIn("主对比基线", text)
+
+    def test_concept_reference_defines_seed_vocabulary_and_three_way_paper_method_policy(self):
+        text = CONCEPT_CATEGORIES.read_text(encoding="utf-8")
+
+        self.assertIn("## Systems Concept Seed Vocabulary", text)
+        for concept_type in [
+            "data-structure",
+            "algorithm",
+            "mechanism",
+            "architecture",
+            "hardware",
+            "software-abstraction",
+            "metric",
+            "theory-model",
+        ]:
+            self.assertRegex(text, rf"(?m)^\|\s*{re.escape(concept_type)}\s*\|")
+
+        for seed in ["RDMA", "NVLink", "PCIe", "NUMA", "HBM", "CXL", "AllReduce", "NCCL", "CUDA"]:
+            self.assertIn(seed, text)
+
+        self.assertIn("论文首创 + 仅本论文实验", text)
+        self.assertIn("论文具名实现 + 前人工作 / 被多篇当 baseline", text)
+        self.assertIn("完全是前人工作 + 该论文只是引用", text)
+
+    def test_concept_generation_prompts_prefer_recall_and_exclude_datasets(self):
+        paper_reader = PAPER_READER_SKILL.read_text(encoding="utf-8")
+        daily_notes = DAILY_PAPERS_NOTES_SKILL.read_text(encoding="utf-8")
+        daemon = PAPER_DAEMON.read_text(encoding="utf-8")
+        combined = "\n".join([paper_reader, daily_notes, daemon])
+
+        self.assertIn("宁可漏判几个通用词，也不要误杀真正的 systems concept", combined)
+        self.assertIn("不确定就创建", combined)
+        self.assertIn("数据集 / 仿真器不作为 concept", combined)
+        self.assertIn("seed list", combined)
+        self.assertIn("首次出现必须写成 `[[概念名]]`", combined)
+        self.assertIn("Admission Control", combined)
+        self.assertIn("Kernel Fusion", combined)
 
     def test_paper_reader_zotero_workflow_is_readonly_and_collection_path_based(self):
         text = PAPER_READER_SKILL.read_text(encoding="utf-8")

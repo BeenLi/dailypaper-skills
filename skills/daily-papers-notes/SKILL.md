@@ -50,14 +50,17 @@ description: |
 **1a: 提取概念列表**
 1. 扫描今天的推荐文件，提取所有 `[[...]]` 链接
 2. 额外从 `/tmp/daily_papers_enriched.json` 的 `method_name` 和 `method_names` 中提取系统名 / 方法名
-3. 合并去重
+3. 读取 `../paper-reader/references/concept-categories.md` 的 seed list；推荐文件或 enriched 数据中命中 seed list 的术语保留为候选
+4. 合并去重
 
 **1b: 过滤**
-只保留以下类型的术语（跳过通用词、论文自身名称、公司名、人名）：
-- 方法/模型名（如 Q-Former, Parseval Regularization, CVAE, PCM）
-- 数据集名（如 AMASS, LaFan1, MotionX, AndroidCode）
-- 仿真器/框架名（如 OmniGibson, IsaacLab, Acados）
-- 技术概念名（如 System Level Synthesis, Consistency Model）
+只保留 systems 技术概念、硬件 / 网络 / runtime / compiler / scheduling / metric / theory 术语、已经形成通用意义的方法名或系统抽象。跳过通用词、论文自身名称、公司名、人名。
+
+过滤默认规则：
+- 宁可漏判几个通用词，也不要误杀真正的 systems concept；不确定就创建，后续再 review。
+- `Admission Control`、`Kernel Fusion`、`RDMA`、`NVLink`、`PCIe`、`NUMA`、`HBM`、`CXL`、`AllReduce`、`NCCL`、`CUDA` 等 seed list 或 systems 基石术语必须保留为候选。
+- 数据集 / 仿真器不作为 concept；不要为 AMASS、LaFan1、MotionX、OmniGibson、IsaacLab、Acados 这类数据集、benchmark suite、仿真器、纯实验环境名称创建 concept。
+- paper-method 按三档处理：论文首创且仅本论文实验 → `status/paper-specific`；论文具名实现且前人工作 / 被多篇当 baseline → 通用 concept；完全是前人工作且该论文只是引用 → 不独立建 concept。
 
 **1c: 创建缺失的概念笔记（自动归类）**
 检查 `{CONCEPTS_PATH}/` 下是否已存在（搜索所有子目录）。对于缺失的概念，**根据概念类型自动归类到对应子目录**，不要全扔 `0-uncategorized/`。
@@ -76,7 +79,8 @@ description: |
    - **行数 < 100 的视为骨架笔记，必须重新生成**（删除旧文件，重新调用 paper-reader）
    - 行数 >= 100 且包含 `## 批判性思考`、`## 复现`、`## 关联笔记`、`## 速查卡片` 的才算合格，可以跳过
 3. 对每篇需要生成/重新生成的论文，调用 `paper-reader` skill（传入 arXiv 链接）
-4. 笔记生成后，paper-reader 会自动补充概念库，无需重复
+4. 笔记生成时，命中 `../paper-reader/references/concept-categories.md` seed list 的术语首次出现必须写成 `[[概念名]]`
+5. 笔记生成后，paper-reader 会自动补充概念库，无需重复
 
 > **铁律**：不论论文数量多少，"必读"的论文**全部**生成笔记，一篇不能少。
 > 耗时长是正常的，不是偷懒的理由。如果 context 接近上限，先把已完成内容落盘；

@@ -70,7 +70,7 @@ description: |
 ### 核心质量规则
 
 1. 所有 Figure、公式、Table 都必须出现。
-2. 技术术语首次出现要加 `[[概念]]` 链接。
+2. 技术术语首次出现要加 `[[概念]]` 链接；`references/concept-categories.md` 的 seed list 命中词，首次出现必须写成 `[[概念名]]`，即使作者把它当常识。
 3. 不用 ASCII 流程图；改用结构化 Markdown 和必要公式。
 4. 公式必须有名称和 LaTeX，并用自然段解释建模对象、变量角色及其支撑的设计或结论。
 5. 图片优先外链 arXiv HTML / 项目主页，失败再本地下载。
@@ -130,8 +130,17 @@ created: YYYY-MM-DD
 每篇论文读完后必须：
 
 1. 扫描所有 `[[概念]]` 链接
-2. 检查概念笔记是否存在
-3. 不存在的按 `references/concept-categories.md` 自动归类并创建
+2. 在 `{CONCEPTS_PATH}` 下**递归**查找是否已存在（不要只看顶层）
+3. 不存在的按 `references/concept-categories.md` 的 8 类 `concept_type` 归类后创建
+
+概念按性质分类（`data-structure / algorithm / mechanism / architecture / hardware / software-abstraction / metric / theory-model`），**不**按论文研究领域分类。仅被本论文使用的方法名优先折回论文笔记，不独立成 concept（详见 `references/concept-categories.md`）。
+
+过滤默认规则：
+
+- 宁可漏判几个通用词，也不要误杀真正的 systems concept；不确定就创建，后续再 review。
+- `Admission Control`、`Kernel Fusion`、`RDMA`、`NVLink`、`PCIe`、`NUMA`、`HBM`、`CXL`、`AllReduce`、`NCCL`、`CUDA` 等 seed list 或 systems 基石术语必须保留为候选。
+- 数据集 / 仿真器不作为 concept；不要为数据集、benchmark suite、仿真器、纯实验环境名称创建 concept。
+- paper-method 按三档处理：论文首创且仅本论文实验 → `status/paper-specific`；论文具名实现且前人工作 / 被多篇当 baseline → 通用 concept；完全是前人工作且该论文只是引用 → 不独立建 concept。
 
 ## 6. 完成后自检
 

@@ -451,7 +451,7 @@ Zotero ItemID: {item_id}
 参考高质量笔记风格，必须包含：
 
 1. **元信息表格**: 机构、日期、项目主页、主对比基线
-2. **内联概念链接**: 在正文中使用 `[[Flow Matching]]`、`[[DiT]]` 链接概念，不只是在文末
+2. **内联概念链接**: 在正文中使用 `[[KV Cache]]`、`[[Roofline Model]]`、`[[AllReduce]]` 链接概念，不只是在文末；`skills/paper-reader/references/concept-categories.md` 的 seed list 命中词，首次出现必须写成 `[[概念名]]`
 3. **公式格式**: 每个公式后用自然段解读它建模的系统现象、变量角色，以及它支撑的设计或结论；必要时在段落中解释符号
 4. **图片格式**: `### Figure X: 英文标题 / 中文标题` + 在线URL + 自然段解读；说明图片在论文论证链中的作用、关键趋势或定量证据，禁止保留填空式模板标签
 5. **系统结构**: `系统架构与执行流` 优先使用 Obsidian Mermaid（默认 `flowchart LR`），随后用自然段解释边界、输入输出、离线/在线分工和支撑的设计或结论
@@ -479,12 +479,21 @@ Zotero ItemID: {item_id}
 1. 论文中首次遇到的技术术语（如 KV Cache, Roofline Model, AllReduce, Kernel Fusion, RDMA）
 2. 论文提出的新方法名（如果是通用概念）
 3. 在笔记中使用了 [[概念]] 链接但该概念笔记不存在
+4. seed list 命中但概念库不存在的 systems 基石术语（如 RDMA, NVLink, PCIe, NUMA, HBM, CXL, AllReduce, NCCL, CUDA）
+
+### 过滤默认规则
+
+- 宁可漏判几个通用词，也不要误杀真正的 systems concept；不确定就创建，后续再 review。
+- `Admission Control`、`Kernel Fusion`、`RDMA`、`NVLink`、`PCIe`、`NUMA`、`HBM`、`CXL`、`AllReduce`、`NCCL`、`CUDA` 等 seed list 或 systems 基石术语必须保留为候选。
+- 数据集 / 仿真器不作为 concept；不要为数据集、benchmark suite、仿真器、纯实验环境名称创建 concept。
 
 ### 概念笔记格式
 ```markdown
 ---
 type: concept
 aliases: [别名1, 别名2]
+concept_type: <从下面 8 类选一>
+tags: [status/paper-specific]  # 仅在仅被本论文使用时加，否则省略
 ---
 
 # 概念名称
@@ -509,25 +518,34 @@ $$公式$$
 
 ### 分类规则（单一信源）
 
-分类**必须**按 `skills/paper-reader/references/concept-categories.md` 中的 systems 主线归类执行：
+概念**按概念本身的性质**分类，不按论文研究领域分类。完整归类标准、判定原则、paper-method 处理规约见 `skills/paper-reader/references/concept-categories.md`。
 
-- `1-Computer Architecture and Accelerators`
-- `2-Memory and Storage Systems`
-- `3-Networking and Interconnects`
-- `4-Distributed Systems`
-- `5-Compilers and Runtime Systems`
-- `6-Performance, Evaluation and Benchmarking`
-- `0-uncategorized`（仅在完全无法判断时使用，应尽量避免）
+`concept_type` 必须从下面 8 类中选：
 
-完整归类标准、示例和原则见上述 reference 文件。
+- `data-structure`：数据格式 / 表示 / 结构（BFloat16, KV Cache, FP8）
+- `algorithm`：脱离系统也成立的纯计算逻辑（Huffman Coding, Arithmetic Coding）
+- `mechanism`：绑定系统上下文的运行时策略（PagedAttention, Kernel Fusion, Micro-Batching）
+- `architecture`：宏观系统架构 / 服务模式（LLM Serving, Parameter Server）
+- `hardware`：硬件部件 / 计算单元 / 物理互联（Tensor Core, SIMT, NVLink, HBM）
+- `software-abstraction`：OS / 框架层接口与协议（CUDA, MPI, NCCL, vLLM Engine）
+- `metric`：评估指标 / 测量口径（SLO, TTFT, Tail Latency）
+- `theory-model`：性能数学模型 + 纯数学基础（Roofline Model, Error Function）
 
-**禁止**自创 `1-生成模型 / 2-强化学习 / 3-机器人策略 / 4-足式运动` 等机器人 / CV 风格的分类目录，那不是 systems 主线。
+**algorithm vs mechanism**：脱离系统是否成立？成立 → algorithm，不成立 → mechanism。
+
+**paper-method 三档处理**：
+- 论文首创 + 仅本论文实验：落到最接近的 `concept_type`，并加 `tags: [status/paper-specific]`
+- 论文具名实现 + 前人工作 / 被多篇当 baseline：直接升格为通用 concept，不加 `status/paper-specific`；在论文笔记里讲清该论文的具名实现细节
+- 完全是前人工作 + 该论文只是引用：不该独立成 concept，只在论文笔记内提及或链接已有 concept
+
+**禁止**自创新的顶级目录（如 "1-生成模型 / 论文方法名" 等）。
 
 ### 执行步骤
 1. 分析完论文后，列出笔记中所有 [[概念]] 链接
-2. 用 `ls {concepts_root}` 查看已有分类目录；对每个概念在该目录及子目录里检查是否已存在
-3. 对于不存在的概念，按上面 systems 主线选定目标子目录
-4. 使用 Write 工具写入概念笔记
+2. 用 `ls {concepts_root}` 查看已有的 8 个 concept_type 目录；对每个概念**递归**查找是否已存在
+3. 对于不存在的概念，按上面 8 类选定 `concept_type`，落到对应子目录
+4. paper-method 按上面的三档规则处理；不要把纯前人工作或仅被引用的 baseline 独立成 concept
+5. 使用 Write 工具写入概念笔记
 
 ## Zotero 与保存规则（重要）
 
