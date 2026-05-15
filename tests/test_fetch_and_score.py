@@ -108,6 +108,61 @@ class FetchAndScoreTests(unittest.TestCase):
 
         self.assertEqual(titles, ["FlashServe: Fast and Elastic LLM Serving in GPU Clusters"])
 
+    def test_paper_lookup_keys_returns_arxiv_doi_and_title(self):
+        paper = {
+            "url": "https://arxiv.org/abs/2501.01234",
+            "title": "FlashInfer: Communication-Aware LLM Serving.",
+            "doi": "10.1145/Example",
+        }
+
+        keys = self.module.paper_lookup_keys(paper)
+
+        self.assertIn("arxiv:2501.01234", keys)
+        self.assertIn("doi:10.1145/example", keys)
+        self.assertIn("title:flashinfercommunicationawarellmserving", keys)
+
+    def test_dblp_paper_with_doi_url_emits_doi_key(self):
+        paper = {
+            "url": "https://doi.org/10.1109/HPCA68181.2026.11408444",
+            "title": "Oaken: Fast and Efficient LLM Serving.",
+        }
+
+        keys = self.module.paper_lookup_keys(paper)
+
+        self.assertIn("doi:10.1109/hpca68181.2026.11408444", keys)
+        self.assertIn("title:oakenfastandefficientllmserving", keys)
+        self.assertFalse(any(k.startswith("arxiv:") for k in keys))
+
+    def test_history_dedup_skips_dblp_paper_whose_title_is_in_history(self):
+        history = [
+            {"id": "Oaken: Fast and Efficient LLM Serving.", "title": "Oaken: Fast and Efficient LLM Serving.", "date": "2026-04-14"},
+            {"id": "10.1109/HPCA68181.2026.11408444", "title": "Some HPCA Paper.", "date": "2026-04-14"},
+        ]
+        history_keys, _ = self.module.build_history_index(history)
+
+        new_dblp_paper = {
+            "source": "dblp",
+            "url": "https://dblp.org/...",
+            "title": "Oaken: Fast and Efficient LLM Serving.",
+            "score": 10,
+        }
+
+        self.assertTrue(self.module.paper_lookup_keys(new_dblp_paper) & history_keys)
+
+    def test_history_dedup_skips_paper_recorded_by_doi(self):
+        history = [
+            {"id": "10.1109/HPCA68181.2026.11408444", "title": "Some HPCA Paper.", "date": "2026-04-14"},
+        ]
+        history_keys, _ = self.module.build_history_index(history)
+
+        new_paper = {
+            "source": "dblp",
+            "url": "https://doi.org/10.1109/HPCA68181.2026.11408444",
+            "title": "Some HPCA Paper.",
+            "score": 8,
+        }
+
+        self.assertTrue(self.module.paper_lookup_keys(new_paper) & history_keys)
 
 if __name__ == "__main__":
     unittest.main()

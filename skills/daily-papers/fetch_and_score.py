@@ -452,16 +452,73 @@ def fetch_arxiv_papers(start_date=None, end_date=None, days: int = 1) -> list[di
     return papers
 
 
-def extract_arxiv_id(url: str) -> str:
-    match = re.search(r"(\d{4}\.\d{4,5})", url)
+def extract_arxiv_id(text: str) -> str:
+    """Pull an arXiv id from a string.
+
+    Accepts either an arXiv URL / ``arXiv:xxxx.yyyy`` reference, or a raw
+    bare id like ``2501.01234`` (or ``2501.01234v2``). Refuses to match
+    digit runs inside unrelated identifiers such as DOIs."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    if "arxiv" in lowered:
+        match = re.search(r"(\d{4}\.\d{4,5})", text)
+        return match.group(1) if match else ""
+    match = re.fullmatch(r"(\d{4}\.\d{4,5})(?:v\d+)?", text)
     return match.group(1) if match else ""
 
 
+_DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\"'<>]+)", re.IGNORECASE)
+
+
+def extract_doi(text: str) -> str:
+    match = _DOI_RE.search(text or "")
+    if not match:
+        return ""
+    return match.group(1).rstrip(".,);").lower()
+
+
+def normalize_title(title: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (title or "").lower())
+
+
+def paper_lookup_keys(paper: dict) -> set[str]:
+    """Return all lookup keys identifying a paper. Used for history dedup,
+    where the same paper may be referenced by arxiv id, DOI, or normalized
+    title across different sources / history schemas."""
+    keys: set[str] = set()
+    url = paper.get("url", "") or ""
+    title = paper.get("title", "") or ""
+    explicit_id = str(paper.get("id", "") or "")
+    explicit_doi = paper.get("doi", "") or ""
+
+    arxiv = extract_arxiv_id(url) or extract_arxiv_id(explicit_id)
+    if arxiv:
+        keys.add(f"arxiv:{arxiv}")
+
+    for candidate in (explicit_doi, url, explicit_id):
+        doi = extract_doi(candidate)
+        if doi:
+            keys.add(f"doi:{doi}")
+            break
+
+    fallback_title = title or (explicit_id if not explicit_id.startswith(("http", "10.")) else "")
+    norm = normalize_title(fallback_title)
+    if norm:
+        keys.add(f"title:{norm}")
+
+    return keys
+
+
 def dedup_key(paper: dict) -> str:
-    arxiv_id = extract_arxiv_id(paper.get("url", ""))
-    if arxiv_id:
-        return f"arxiv:{arxiv_id}"
-    return f"title:{paper.get('title', '').strip().lower()}"
+    """Single strongest key for in-memory merge dedup. Prefers arxiv > doi > title."""
+    keys = paper_lookup_keys(paper)
+    for prefix in ("arxiv:", "doi:", "title:"):
+        for key in keys:
+            if key.startswith(prefix):
+                return key
+    return f"title:{(paper.get('title') or '').strip().lower()}"
 
 
 def load_history() -> list[dict]:
@@ -489,6 +546,29 @@ def load_fallback_ids(days: int = 7) -> set[str]:
     return ids
 
 
+def build_history_index(history: list[dict]) -> tuple[set[str], dict[str, str]]:
+    """Build a set of all lookup keys present in history plus a key→date map.
+    Tolerant of history rows that use title, DOI, or arxiv URL as the id."""
+    keys: set[str] = set()
+    key_dates: dict[str, str] = {}
+    for item in history:
+        raw_id = str(item.get("id", "") or "")
+        item_keys = paper_lookup_keys(
+            {
+                "url": raw_id if raw_id.startswith("http") else "",
+                "doi": raw_id if raw_id.startswith("10.") else "",
+                "title": item.get("title", "") or (raw_id if not raw_id.startswith(("http", "10.")) else ""),
+                "id": raw_id,
+            }
+        )
+        paper_date = item.get("date", "") or ""
+        for key in item_keys:
+            keys.add(key)
+            if paper_date and (key not in key_dates or paper_date < key_dates[key]):
+                key_dates[key] = paper_date
+    return keys, key_dates
+
+
 def merge_and_dedup(primary_papers: list[dict], arxiv_papers: list[dict], target_date, days: int = 1, top_n: int = TOP_N) -> list[dict]:
     by_key = {}
     for paper in primary_papers + arxiv_papers:
@@ -506,23 +586,17 @@ def merge_and_dedup(primary_papers: list[dict], arxiv_papers: list[dict], target
         return top
 
     history = load_history()
-    history_ids = {}
-    for item in history:
-        paper_id = item.get("id", "")
-        paper_date = item.get("date", "")
-        if paper_id and paper_date:
-            if paper_id not in history_ids or paper_date < history_ids[paper_id]:
-                history_ids[paper_id] = paper_date
+    history_keys, history_dates = build_history_index(history)
 
     if len(history) < 10:
         for paper_id in load_fallback_ids():
-            history_ids.setdefault(paper_id, "unknown")
+            history_keys.add(f"arxiv:{paper_id}")
+            history_dates.setdefault(f"arxiv:{paper_id}", "unknown")
 
     deduped = {}
     removed = 0
     for key, paper in by_key.items():
-        paper_id = extract_arxiv_id(paper.get("url", ""))
-        if paper_id and paper_id in history_ids:
+        if paper_lookup_keys(paper) & history_keys:
             removed += 1
             continue
         deduped[key] = paper
@@ -535,14 +609,16 @@ def merge_and_dedup(primary_papers: list[dict], arxiv_papers: list[dict], target
     if len(candidates) < 20 and removed > 0:
         backfill = []
         for paper in by_key.values():
-            paper_id = extract_arxiv_id(paper.get("url", ""))
-            if not paper_id or paper_id not in history_ids:
-                continue
-            if paper["score"] < MIN_SCORE:
+            paper_keys = paper_lookup_keys(paper)
+            matched_keys = paper_keys & history_keys
+            if not matched_keys or paper["score"] < MIN_SCORE:
                 continue
             paper = dict(paper)
             paper["is_re_recommend"] = True
-            paper["last_recommend_date"] = history_ids.get(paper_id, "unknown")
+            paper["last_recommend_date"] = next(
+                (history_dates.get(k, "unknown") for k in matched_keys),
+                "unknown",
+            )
             backfill.append(paper)
         backfill.sort(key=lambda item: item["score"], reverse=True)
         needed = 20 - len(candidates)
