@@ -476,7 +476,7 @@ Zotero ItemID: {item_id}
 {concepts_root}
 
 ### 需要创建概念笔记的情况
-1. 论文中首次遇到的技术术语（如 Flow Matching、Action Chunking、DiT）
+1. 论文中首次遇到的技术术语（如 KV Cache, Roofline Model, AllReduce, Kernel Fusion, RDMA）
 2. 论文提出的新方法名（如果是通用概念）
 3. 在笔记中使用了 [[概念]] 链接但该概念笔记不存在
 
@@ -507,18 +507,26 @@ $$公式$$
 - [[相关概念1]]
 ```
 
-### 概念目录结构（已存在的分类）
-- 1-生成模型/: Diffusion Model, DiT, VAE, Flow Matching, EDM, Latent Diffusion 等
-- 2-强化学习/: MDP, Policy, Value Function, PPO, GAIL, World Model 等
-- 3-机器人策略/: Action Chunking, Inverse Dynamics Model, Sim-to-Real 等
-- 4-足式运动/: CPG, Curriculum Learning, Privileged Learning 等
-- 5-导航与定位/: VLN 等
-- 如果是新领域，创建新的子目录（如 6-3D视觉/）
+### 分类规则（单一信源）
+
+分类**必须**按 `skills/paper-reader/references/concept-categories.md` 中的 systems 主线归类执行：
+
+- `1-Computer Architecture and Accelerators`
+- `2-Memory and Storage Systems`
+- `3-Networking and Interconnects`
+- `4-Distributed Systems`
+- `5-Compilers and Runtime Systems`
+- `6-Performance, Evaluation and Benchmarking`
+- `0-uncategorized`（仅在完全无法判断时使用，应尽量避免）
+
+完整归类标准、示例和原则见上述 reference 文件。
+
+**禁止**自创 `1-生成模型 / 2-强化学习 / 3-机器人策略 / 4-足式运动` 等机器人 / CV 风格的分类目录，那不是 systems 主线。
 
 ### 执行步骤
 1. 分析完论文后，列出笔记中所有 [[概念]] 链接
-2. 检查每个概念是否已存在：查看 `{concepts_root}` 下已有概念笔记
-3. 对于不存在的概念，创建概念笔记文件
+2. 用 `ls {concepts_root}` 查看已有分类目录；对每个概念在该目录及子目录里检查是否已存在
+3. 对于不存在的概念，按上面 systems 主线选定目标子目录
 4. 使用 Write 工具写入概念笔记
 
 ## Zotero 与保存规则（重要）
