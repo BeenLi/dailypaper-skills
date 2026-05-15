@@ -1,5 +1,6 @@
 import importlib.util
 import unittest
+from datetime import date
 from pathlib import Path
 
 
@@ -163,6 +164,33 @@ class FetchAndScoreTests(unittest.TestCase):
         }
 
         self.assertTrue(self.module.paper_lookup_keys(new_paper) & history_keys)
+
+    def test_apply_age_decay_reduces_score_for_year_old_papers(self):
+        target = date(2026, 5, 14)
+        papers = [
+            {"date": "2026-05-13", "score": 10},  # 1 day, no decay
+            {"date": "2025-12-01", "score": 10},  # ~165 days, 0.75 → 7
+            {"date": "2025-01-01", "score": 10},  # ~500 days, 0.35 → 3
+        ]
+
+        self.module.apply_age_decay(papers, target)
+
+        self.assertEqual(papers[0]["score"], 10)
+        self.assertEqual(papers[1]["score"], 7)
+        self.assertEqual(papers[2]["score"], 3)
+
+    def test_select_with_quota_caps_dblp_share(self):
+        candidates = (
+            [{"source": "dblp", "score": 20 - i, "title": f"d{i}"} for i in range(15)]
+            + [{"source": "arxiv", "score": 5 - (i % 3), "title": f"a{i}"} for i in range(10)]
+        )
+
+        top = self.module.select_with_quota(candidates, top_n=10, dblp_max_ratio=0.4)
+
+        dblp_count = sum(1 for p in top if p["source"] == "dblp")
+        self.assertLessEqual(dblp_count, 4)
+        self.assertEqual(len(top), 10)
+
 
 if __name__ == "__main__":
     unittest.main()

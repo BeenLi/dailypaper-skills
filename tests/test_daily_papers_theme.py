@@ -77,7 +77,7 @@ class DailyPapersThemeTests(unittest.TestCase):
         for keyword in required_negative_terms:
             self.assertIn(keyword, negatives)
 
-        self.assertEqual(daily["top_n"], 5)
+        self.assertEqual(daily["top_n"], 20)
 
     def test_fetch_and_review_skills_use_narrow_llm_systems_theme(self):
         fetch_text = FETCH_SKILL.read_text(encoding="utf-8")

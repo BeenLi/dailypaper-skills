@@ -521,6 +521,41 @@ def dedup_key(paper: dict) -> str:
     return f"title:{(paper.get('title') or '').strip().lower()}"
 
 
+def apply_age_decay(papers: list[dict], target_date) -> None:
+    """Reduce score for older papers so DBLP back-catalog cannot overpower
+    today's arXiv. Mutates papers in place."""
+    for paper in papers:
+        date_str = paper.get("date", "") or ""
+        if not date_str:
+            continue
+        try:
+            pdate = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        age_days = (target_date - pdate).days
+        if age_days <= 30:
+            continue
+        if age_days <= 180:
+            factor = 0.75
+        elif age_days <= 365:
+            factor = 0.55
+        else:
+            factor = 0.35
+        paper["score"] = int(paper["score"] * factor)
+
+
+def select_with_quota(candidates: list[dict], top_n: int, dblp_max_ratio: float = 0.4) -> list[dict]:
+    """Cap how many slots DBLP / venue scrapes can take, so today's arXiv
+    is not crowded out by year-old conference papers."""
+    dblp_max = max(1, int(top_n * dblp_max_ratio))
+    arxiv = [p for p in candidates if p.get("source") == "arxiv"]
+    others = [p for p in candidates if p.get("source") != "arxiv"]
+    others = others[:dblp_max]
+    combined = arxiv + others
+    combined.sort(key=lambda item: item["score"], reverse=True)
+    return combined[:top_n]
+
+
 def load_history() -> list[dict]:
     if HISTORY_PATH.exists():
         try:
@@ -578,10 +613,11 @@ def merge_and_dedup(primary_papers: list[dict], arxiv_papers: list[dict], target
 
     print(f"  Merged: {len(by_key)} unique papers", file=sys.stderr)
 
+    apply_age_decay(list(by_key.values()), target_date)
+
     if days > 1:
         candidates = [paper for paper in by_key.values() if paper["score"] >= MIN_SCORE]
-        candidates.sort(key=lambda item: item["score"], reverse=True)
-        top = candidates[:top_n]
+        top = select_with_quota(candidates, top_n)
         print(f"  Multi-day mode: {len(top)} papers", file=sys.stderr)
         return top
 
@@ -604,9 +640,9 @@ def merge_and_dedup(primary_papers: list[dict], arxiv_papers: list[dict], target
     print(f"  After history dedup: {len(deduped)} (removed {removed})", file=sys.stderr)
 
     candidates = [paper for paper in deduped.values() if paper["score"] >= MIN_SCORE]
-    candidates.sort(key=lambda item: item["score"], reverse=True)
+    top = select_with_quota(candidates, top_n)
 
-    if len(candidates) < 20 and removed > 0:
+    if len(top) < top_n and removed > 0:
         backfill = []
         for paper in by_key.values():
             paper_keys = paper_lookup_keys(paper)
@@ -621,12 +657,11 @@ def merge_and_dedup(primary_papers: list[dict], arxiv_papers: list[dict], target
             )
             backfill.append(paper)
         backfill.sort(key=lambda item: item["score"], reverse=True)
-        needed = 20 - len(candidates)
-        candidates.extend(backfill[:needed])
+        needed = top_n - len(top)
         if needed > 0 and backfill:
+            top.extend(backfill[:needed])
             print(f"  Back-filled {min(needed, len(backfill))} from history", file=sys.stderr)
 
-    top = candidates[:top_n]
     print(f"  Final: {len(top)} papers", file=sys.stderr)
     return top
 
