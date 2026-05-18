@@ -146,6 +146,25 @@ $$
 
 ### 系统组成与职责
 
+#### 模块关系图
+
+```mermaid
+flowchart TB
+    Core["核心决策模块"]
+    State["状态表 / metadata / profile"]
+    Monitor["监控 / 采样 / 反馈模块"]
+    Executor["执行模块 / cache / memory / device"]
+    Policy["策略 / 参数配置"]
+
+    Monitor -- "统计 / miss / latency / counter" --> State
+    State -- "lookup / update" --> Core
+    Policy -- "threshold / mapping / replacement rule" --> Core
+    Core -- "hint / schedule / prediction / action" --> Executor
+    Executor -- "执行结果 / 反馈" --> Monitor
+```
+
+{用自然段解释模块之间的依赖关系：核心决策模块依赖哪些状态或参数，监控 / 采样 / 反馈模块如何更新状态，执行模块如何消费 hint / metadata / schedule / prediction，反馈路径如何闭环，以及这种模块划分如何支撑论文的核心设计。若论文是硬件机制，优先标出 pipeline stage、cache / predictor / prefetcher / controller 等模块；若论文是分布式系统，优先标出 client、scheduler、worker、runtime、storage / network 等角色。}
+
 | 组件 | 职责 | 输入输出 | 关键状态或参数 | 关联概念 |
 |------|------|----------|----------------|----------|
 | {组件1} | {它在系统中负责什么} | {输入 → 输出} | {队列 / cache / counter / cap / profile 等} | [[{概念1}]] |

@@ -33,6 +33,7 @@ class SystemsTemplateTests(unittest.TestCase):
             "### 系统架构与执行流",
             "### 优化目标与度量口径",
             "### 系统组成与职责",
+            "#### 模块关系图",
             "## 关键机制拆解",
             "## 实验设置",
             "## 核心结果",
@@ -71,6 +72,15 @@ class SystemsTemplateTests(unittest.TestCase):
         self.assertIn("#### Silicon-feasibility", text)
         self.assertIn("```mermaid", text)
         self.assertIn("flowchart LR", text)
+        self.assertIn("flowchart TB", text)
+        self.assertRegex(
+            text,
+            r"### 系统组成与职责[\s\S]*#### 模块关系图[\s\S]*```mermaid[\s\S]*核心决策模块[\s\S]*状态表 / metadata / profile[\s\S]*反馈模块[\s\S]*策略 / 参数配置",
+        )
+        self.assertNotRegex(
+            text,
+            r"### 系统组成与职责[\s\S]*#### 模块关系图[\s\S]*Source\[",
+        )
         assert_table_header(self, text, ["组件", "职责", "输入输出", "关键状态或参数", "关联概念"])
 
     def test_asset_template_removes_cv_robotics_defaults(self):
