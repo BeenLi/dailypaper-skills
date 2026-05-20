@@ -26,6 +26,13 @@ ZOTERO_DB = zotero_db_path()
 STORAGE_DIR = zotero_storage_dir()
 ZOTERO_DIR = ZOTERO_DB.parent
 
+DEPRECATED_COMMAND_REPLACEMENTS = {
+    "papers": "zotero_helper.py resolve --collection-id <collection_id> [--recursive]",
+    "search": 'zotero_helper.py resolve --query "<keyword>"',
+    "info": "zotero_helper.py resolve --item-id <item_id>",
+    "find-collection": 'zotero_helper.py resolve --collection "<collection name or path>"',
+}
+
 
 class CopiedZoteroConnection(sqlite3.Connection):
     """sqlite3 connection carrying the temporary copy path for cleanup."""
@@ -899,6 +906,17 @@ def print_json(data: Any):
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
+def warn_if_deprecated_command(command: str) -> None:
+    replacement = DEPRECATED_COMMAND_REPLACEMENTS.get(command)
+    if not replacement:
+        return
+    print(
+        f"[DEPRECATED] zotero_helper.py {command} is deprecated; use {replacement}. "
+        "This compatibility command will be removed in the next related zotero_helper cleanup.",
+        file=sys.stderr,
+    )
+
+
 def list_collections(conn):
     """列出所有分类"""
     cursor = conn.cursor()
@@ -1250,6 +1268,7 @@ def main():
     move_parser.add_argument('--from', dest='old_collection_id', type=int, help='旧分类ID（可选）')
 
     args = parser.parse_args()
+    warn_if_deprecated_command(args.command or "")
 
     if not ZOTERO_DB.exists() and args.command not in {'note-path'}:
         print(f"Zotero 数据库不存在: {ZOTERO_DB}")

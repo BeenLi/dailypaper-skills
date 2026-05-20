@@ -21,7 +21,7 @@ def main() -> int:
         root_dir=paper_notes_dir(),
         title_prefix="论文目录页",
         intro="用于浏览论文笔记、分类目录和子主题入口。",
-        exclude_dir_names={paths_config()["concepts_folder"], "_inbox"},
+        exclude_dir_names={paths_config()["concepts_folder"], "_inbox", "00_assets"},
         moc_filename_prefix=moc_filename_prefix(),
     )
     print(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2))

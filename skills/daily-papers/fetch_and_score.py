@@ -66,6 +66,20 @@ JOURNAL_SPECS = [
     {"slug": "ton", "name": "IEEE/ACM ToN", "dblp_path": "journals/ton/ton{volume}.html", "base_year": 1993, "base_volume": 1},
 ]
 
+VENUE_MONTH_HINTS = {
+    "isca": 6,
+    "micro": 10,
+    "asplos": 4,
+    "sigcomm": 9,
+    "nsdi": 4,
+    "osdi": 7,
+    "atc": 7,
+    "eurosys": 4,
+    "sc": 11,
+    "mlsys": 5,
+    "hpca": 3,
+}
+
 
 def strip_tags(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
@@ -75,13 +89,33 @@ def normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", unescape(text or "")).strip()
 
 
+def normalize_venue_slug(venue: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "", (venue or "").lower())
+    aliases = {"usenixatc": "atc"}
+    if normalized in aliases:
+        return aliases[normalized]
+
+    for spec in VENUE_SPECS:
+        if normalized in {
+            re.sub(r"[^a-z0-9]+", "", spec["slug"].lower()),
+            re.sub(r"[^a-z0-9]+", "", spec["name"].lower()),
+        }:
+            return spec["slug"]
+    return normalized
+
+
+def placeholder_publication_date(venue: str, year: int) -> str:
+    month = VENUE_MONTH_HINTS.get(normalize_venue_slug(venue), 1)
+    return f"{year}-{month:02d}-01"
+
+
 def score_paper(paper: dict) -> int:
     text = (paper.get("title", "") + " " + paper.get("abstract", "")).lower()
     title_lower = paper.get("title", "").lower()
     venue_text = (paper.get("venue", "") + " " + paper.get("source", "")).lower()
 
     for neg in NEGATIVE_KEYWORDS:
-        if neg in text:
+        if neg.lower() in title_lower:
             return -999
 
     score = 0
@@ -243,7 +277,7 @@ def parse_dblp_proceedings_html(html: str, venue: str, year: int) -> list[dict]:
                 url=url,
                 source="dblp",
                 venue=f"{display_venue_name(venue)} {year}",
-                date=f"{year}-01-01",
+                date=placeholder_publication_date(venue, year),
             )
         )
 
@@ -331,7 +365,7 @@ def fetch_conference_program_papers(target_date) -> list[dict]:
                 url=url,
                 source="conference-program",
                 venue=venue_label(spec, year),
-                date=f"{year}-01-01",
+                date=placeholder_publication_date(spec["slug"], year),
             )
             paper["score"] = score_paper(paper)
             if paper["score"] >= MIN_SCORE:

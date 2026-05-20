@@ -1,248 +1,211 @@
 # Architecture
 
-本文档说明 `dailypaper-skills` 当前实现：它不是一个常驻服务，而是一组 Codex skills + Python helper scripts。Codex 负责理解用户意图和写长文档；Python 脚本负责确定性抓取、去重、路径规划、索引生成和质量检查。
+`dailypaper-skills` 不是常驻服务，而是一组 Codex skills + Python helper scripts。Codex 负责理解用户意图、写推荐和长笔记；Python 负责确定性抓取、去重、路径规划、Zotero 读取、MOC 生成和检查。
 
-## 总览
+这份文件是仓库里的 canonical 架构文档。Obsidian 中的同名使用指南应当是它的 hard link，方便在 Obsidian 里阅读和编辑同一份文件。
+
+## 一句话理解
+
+用户说一句自然语言，系统把它路由到对应 skill：
+
+- `今日论文推荐`：抓取候选论文，富化信息，生成每日推荐。
+- `读一下这篇论文 ...`：读取 PDF / arXiv / Zotero，按模板生成 Obsidian 论文笔记。
+- `批量读 Zotero collection ...`：按 Zotero collection 递归处理论文，保存到同构目录。
+- `更新索引`：刷新论文和概念目录页。
+
+核心原则：
+
+- 论文目录由 Zotero collection path 决定，不靠关键词猜分类。
+- 概念目录由 `concept_type` 决定，不按论文研究领域分类。
+- Zotero 默认只读；写 Zotero collection 只能在用户明确要求后执行。
+- 每日推荐默认只做 fetch + review，不自动精读生成长笔记。
+
+## 核心心智模型
+
+| 概念 | 位置 | 作用 |
+|---|---|---|
+| Skill | `skills/*/SKILL.md` | 用户意图到具体流程的入口说明 |
+| 三步流水线 | `daily-papers-fetch` → `daily-papers-review` → `daily-papers-notes` | 抓取、点评、可选精读 |
+| `paper-reader` | `skills/paper-reader/SKILL.md` | 单篇 / 批量论文阅读和笔记生成 |
+| `_shared` 配置 | `skills/_shared/user_config.py` | 统一读取 Obsidian、Zotero、关键词和自动化配置 |
+| Zotero helper | `skills/paper-reader/assets/zotero_helper.py` | 解析 item、collection、PDF、保存路径和已有笔记 |
+| MOC | `skills/_shared/generate_*_mocs.py` | 递归生成 `_index_*.md` 目录页 |
+
+## 总体流程
 
 ```mermaid
 flowchart LR
-    userInput["用户指令"] --> orchestrator["Codex skill 路由"]
-
-    subgraph dailyFlow["每日推荐"]
-        fetchSkill["daily-papers-fetch"] --> tmpTop[("/tmp/daily_papers_top30.json")]
-        tmpTop --> enrichScript["enrich_papers.py"]
-        enrichScript --> tmpEnriched[("/tmp/daily_papers_enriched.json")]
-        tmpEnriched --> reviewSkill["daily-papers-review"]
-        reviewSkill --> dailyNote["DailyPapers 推荐"]
-    end
-
-    subgraph readFlow["单篇阅读"]
-        paperReader["paper-reader"] --> zoteroHelper["zotero_helper.py"]
-        paperReader --> paperNote["PaperNotes 论文笔记"]
-        paperReader --> conceptNote["_concepts 概念笔记"]
-    end
-
-    subgraph maintenance["维护工具"]
-        scanConcepts["scan_missing_concepts.py"] --> conceptReport["missing concepts CSV"]
-        mocScripts["generate MOC scripts"] --> mocPages["_index_ 目录页"]
-    end
-
-    orchestrator --> fetchSkill
-    orchestrator --> paperReader
-    orchestrator --> mocScripts
-    zoteroHelper -.->|"只读"| zoteroDb[/"Zotero DB"/]
-    paperNote --> mocScripts
-    conceptNote --> mocScripts
-
-    style userInput fill:#10B981,color:#fff,stroke:#059669
-    style orchestrator fill:#3B82F6,color:#fff,stroke:#2563EB
-    style fetchSkill fill:#3B82F6,color:#fff,stroke:#2563EB
-    style enrichScript fill:#3B82F6,color:#fff,stroke:#2563EB
-    style reviewSkill fill:#3B82F6,color:#fff,stroke:#2563EB
-    style paperReader fill:#3B82F6,color:#fff,stroke:#2563EB
-    style zoteroHelper fill:#3B82F6,color:#fff,stroke:#2563EB
-    style scanConcepts fill:#3B82F6,color:#fff,stroke:#2563EB
-    style mocScripts fill:#3B82F6,color:#fff,stroke:#2563EB
-    style tmpTop fill:#8B5CF6,color:#fff,stroke:#7C3AED
-    style tmpEnriched fill:#8B5CF6,color:#fff,stroke:#7C3AED
-    style zoteroDb fill:#8B5CF6,color:#fff,stroke:#7C3AED
-    style dailyNote fill:#F97316,color:#fff,stroke:#EA580C
-    style paperNote fill:#F97316,color:#fff,stroke:#EA580C
-    style conceptNote fill:#F97316,color:#fff,stroke:#EA580C
-    style conceptReport fill:#F97316,color:#fff,stroke:#EA580C
-    style mocPages fill:#F97316,color:#fff,stroke:#EA580C
+    user["用户指令"] --> router["Skill 路由"]
+    router --> daily["daily-papers"]
+    daily --> fetch["fetch_and_score.py"]
+    fetch --> enrich["enrich_papers.py"]
+    enrich --> review["daily-papers-review"]
+    review --> dailyNote["DailyPapers 推荐"]
+    router --> reader["paper-reader"]
+    reader --> zotero["zotero_helper.py"]
+    zotero -.-> zoteroDb["Zotero 只读 DB"]
+    reader --> paperNote["PaperNotes 笔记"]
+    reader --> conceptNote["_concepts 概念"]
+    router --> mocs["generate-mocs"]
+    paperNote --> mocs
+    conceptNote --> mocs
+    mocs --> indexPages["_index_ 目录页"]
 ```
 
-主入口：
+## 组件职责
 
-| 用户意图 | Skill | 结果 |
+| 组件 | 关键文件 | 职责 |
 |---|---|---|
-| 今日论文推荐 | `daily-papers` | 抓取 + 点评，写入 `DailyPapers/` |
-| 跑单步抓取 | `daily-papers-fetch` | 写 `/tmp/daily_papers_top30.json` 和 `/tmp/daily_papers_enriched.json` |
-| 跑单步点评 | `daily-papers-review` | 写每日推荐文件并更新 `.history.json` |
-| 批量精读 | `daily-papers-notes` | 调 `paper-reader` 生成必读论文笔记并回填链接 |
-| 读单篇论文 | `paper-reader` | 写论文笔记、补概念库、刷新 MOC |
-| 更新索引 | `generate-mocs` | 生成 `_index_*.md` 目录页 |
+| `daily-papers` | `skills/daily-papers/SKILL.md` | 一句话推荐入口，默认串 fetch + review |
+| `daily-papers-fetch` | `skills/daily-papers-fetch/SKILL.md` | 运行抓取、打分、富化脚本 |
+| `fetch_and_score.py` | `skills/daily-papers/fetch_and_score.py` | DBLP / program / arXiv / Semantic Scholar 抓取、打分、去重、配额 |
+| `enrich_papers.py` | `skills/daily-papers/enrich_papers.py` | 补全作者、机构、摘要、图表、方法名和点评信号 |
+| `daily-papers-review` | `skills/daily-papers-review/SKILL.md` | 生成主推 / 备选 / 可跳过推荐文件 |
+| `daily-papers-notes` | `skills/daily-papers-notes/SKILL.md` | 可选批量精读，调用 `paper-reader` 并回填笔记链接 |
+| `paper-reader` | `skills/paper-reader/SKILL.md` | 单篇论文阅读、概念补全、Obsidian 保存 |
+| `paper_daemon.py` | `skills/paper-reader/paper_daemon.py` | Zotero collection 批量处理和断点续跑 |
+| `zotero_helper.py` | `skills/paper-reader/assets/zotero_helper.py` | 只读解析 Zotero、规划 note path、索引已有笔记 |
+| `generate-mocs` | `skills/generate-mocs/SKILL.md` | 手动刷新论文和概念 MOC |
+| `_shared` | `skills/_shared/` | 配置、MOC builder、missing concept scanner |
 
-## 配置层
+## 关键数据与路径
 
-配置集中在 `skills/_shared/user_config.py`：
+```text
+PaperRead/
+├── DailyPapers/
+│   ├── YYYY-MM-DD-论文推荐.md
+│   └── .history.json
+└── PaperNotes/
+    ├── Research Topics/.../{MethodName}.md
+    ├── _concepts/{concept_type}/{ConceptName}.md
+    ├── _inbox/{MethodName}.md
+    └── _index_*.md
+```
 
-1. 读取内置 `DEFAULT_CONFIG`
-2. 合并 `skills/_shared/user-config.json`
-3. 如存在，再合并 `skills/_shared/user-config.local.json`
-
-对外提供：
-
-| 函数 | 用途 |
-|---|---|
-| `obsidian_vault_path()` | Obsidian vault 根目录 |
-| `paper_notes_dir()` | 论文笔记目录 |
-| `daily_papers_dir()` | 每日推荐目录 |
-| `concepts_dir()` | 概念库目录 |
-| `zotero_db_path()` | Zotero SQLite DB |
-| `zotero_storage_dir()` | Zotero 附件目录 |
-| `daily_papers_config()` | 抓取关键词、负词、阈值 |
-| `automation_config()` | MOC / git 自动化开关 |
-| `moc_filename_prefix()` | MOC 文件名前缀 |
-
-`git_push` 只有在 `git_commit=true` 时才可能为真，避免误 push。
+| 数据 | 生产者 | 消费者 |
+|---|---|---|
+| `/tmp/daily_papers_top30.json` | `fetch_and_score.py` | `enrich_papers.py` |
+| `/tmp/daily_papers_enriched.json` | `enrich_papers.py` | `daily-papers-review`、`daily-papers-notes` |
+| `DailyPapers/.history.json` | `daily-papers-review` | `fetch_and_score.py` history dedup |
+| Paper note frontmatter | `paper-reader` | `zotero_helper.py` `NoteIndex` |
+| Concept files | `paper-reader` / manual maintenance | concept MOC、missing concept scan |
 
 ## 每日推荐流水线
 
-### Step 1: `fetch_and_score.py`
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant DP as daily-papers
+    participant F as fetch
+    participant T as 临时JSON
+    participant R as review
+    participant V as Vault
 
-位置：`skills/daily-papers/fetch_and_score.py`
-
-职责：
-
-- 抓取 DBLP proceedings / journal pages。
-- 抓取最近会议 program pages。
-- 抓取 arXiv API：`cs.AR / cs.DC / cs.NI / cs.OS / cs.PL / cs.AI / cs.LG`。
-- 候选不足时补 Semantic Scholar。
-- 用配置中的 keywords / negative keywords / domain boost keywords 打分。
-- 用 arXiv ID、DOI、标题做合并去重。
-- 单日模式下用 `DailyPapers/.history.json` 做 30 天去重；候选不足时可从历史回补并标记 `is_re_recommend`。
-- 控制 DBLP / venue 来源比例，避免旧会议目录挤掉当日 arXiv。
-
-输出：
-
-```text
-/tmp/daily_papers_top30.json
+    U->>DP: 今日论文推荐
+    DP->>F: 解析时间窗口
+    F->>F: 抓取打分去重
+    F->>F: 富化元数据
+    F->>T: 写 enriched JSON
+    DP->>R: 进入点评阶段
+    R->>T: 读取候选
+    R->>V: 写推荐文件和 history
+    R-->>U: 返回主推和备选摘要
 ```
 
-重要边界：
+### 抓取与打分
 
-- `fetch_url()` 对 `429 / 5xx` 做有限重试，支持 `Retry-After`。
-- `negative_keywords` 是强过滤，命中直接排除。
-- 多天模式不走历史去重，适合回看一周候选。
+`fetch_and_score.py` 负责候选生成：
 
-### Step 2: `enrich_papers.py`
+- 来源：DBLP proceedings / journal pages、会议 program pages、arXiv API、Semantic Scholar fallback。
+- arXiv 默认分类：`cs.AR`、`cs.DC`、`cs.NI`、`cs.OS`、`cs.PL`、`cs.AI`、`cs.LG`。
+- venue 关注：ISCA、MICRO、HPCA、ASPLOS、SIGCOMM、NSDI、OSDI、USENIX ATC、EuroSys、SC、MLSys。
+- DBLP conference 只有年份时，用 `VENUE_MONTH_HINTS` 生成典型月份日期，例如 MICRO→10、ISCA→6、ASPLOS→4；journal 日期不套用会议月份。
 
-位置：`skills/daily-papers/enrich_papers.py`
+打分核心：
 
-职责：
+| 信号 | 行为 |
+|---|---|
+| `keywords` 命中标题 | 每个 +3 |
+| `keywords` 命中摘要 | 每个 +1 |
+| `domain_boost_keywords` 命中 | 阶梯加分 |
+| 已知 venue / systems phrase | 加分 |
+| `negative_keywords` 命中标题 | 直接 `-999` 硬排除 |
+| `negative_keywords` 只命中摘要 | 不硬排除 |
 
-- 并发富化候选论文元数据。
-- 通过 arXiv title search、DOI metadata、DOI landing page、Semantic Scholar、OpenAlex 等途径补齐链接和摘要。
-- 从 arXiv HTML / abs 页面提取作者、机构、章节标题、图表 caption、首图。
-- 对 PDF affiliation 提取使用可注入 / 可 mock 的 PDF bytes fetch 层，再交给 `pdftotext` 转文本，避免单测访问真实网络。
-- 推断 `method_name` / `method_names`。
-- 标记 `has_hardware_eval`、`has_end_to_end_eval`、`has_real_workload` 等点评信号。
+去重和排序：
 
-输出：
+- `paper_lookup_keys()` 同时生成 arXiv、DOI、规范化标题 key。
+- `dedup_key()` 用 arXiv > DOI > title 做内存合并。
+- `build_history_index()` 兼容旧 history 中 title、DOI、arXiv URL 混杂的 `id`。
+- 单日模式使用 `.history.json` 做历史去重；候选不足时允许回填历史命中论文并标记 `is_re_recommend`。
+- `apply_age_decay()` 降低旧会议论文分数，避免 DBLP back-catalog 挤掉当天 arXiv。
+- `select_with_quota()` 限制非 arXiv 来源占比，默认 DBLP / venue 来源最多占 `top_n * 40%`。
 
-```text
-/tmp/daily_papers_enriched.json
-```
+### 富化与点评
 
-### Step 3: `daily-papers-review`
+`enrich_papers.py` 并发补全：
 
-这是 Codex 生成推荐文字的阶段。输入是 `/tmp/daily_papers_enriched.json`。
+- arXiv / DOI / Semantic Scholar / OpenAlex 元数据。
+- 作者、机构、章节标题、图表 caption、首图。
+- `method_name`、`method_names`。
+- `has_hardware_eval`、`has_end_to_end_eval`、`has_real_workload` 等信号。
 
-职责：
-
-- 扫描已有论文笔记，避免重复推荐时误认为新论文。
-- 使用 `source` 字段区分 DBLP、conference program、arXiv、Semantic Scholar。
-- 只围绕 LLM inference / serving / training 的体系结构、网络通信、内存 / 存储问题写推荐。
-- 分为 `主推`、`备选`、`可跳过`。
-- 保存 `{DAILY_PAPERS_PATH}/YYYY-MM-DD-论文推荐.md`。
-- 更新 `{DAILY_PAPERS_PATH}/.history.json`。
-
-硬约束：
+`daily-papers-review` 只基于已有证据写推荐：
 
 - `has_hardware_eval=false` 的论文默认不进主推。
-- serving 论文如果 `has_end_to_end_eval=false`，最多进备选。
+- serving 论文若缺 end-to-end evaluation，最多进备选。
 - 不确定信息写“摘要未提及”或“需要看全文确认”。
 
-### Step 4: `daily-papers-notes`（可选）
+## Paper Reader
 
-默认每日推荐不自动执行此阶段。用户显式要求“跑一下论文笔记 / 批量笔记”时才执行。
-
-职责：
-
-- 读取当天推荐文件，筛选主推论文。
-- 检查已有笔记质量：行数、必要章节、公式、图片。
-- 不合格笔记删除后重新调用 `paper-reader`。
-- 回填 `📒 **笔记**: [[NoteName]]` 到推荐文件。
-- 按配置刷新 MOC。
-
-## `paper-reader`
-
-位置：`skills/paper-reader/SKILL.md` 和 `skills/paper-reader/paper_daemon.py`
-
-### 输入类型
+支持输入：
 
 | 输入 | 处理 |
 |---|---|
-| 本地 PDF | 直接读取 PDF |
+| 本地 PDF | 直接读取 |
 | arXiv 链接 | 优先 arXiv HTML，再 PDF |
 | DOI / Paper URL | WebFetch / WebSearch fallback |
 | Zotero item | `zotero_helper.py resolve --item-id` |
-| Zotero 搜索 | `zotero_helper.py resolve --query` |
+| Zotero 搜索 | `zotero_helper.py resolve --query`，多候选时让用户选 |
 | Zotero collection | `zotero_helper.py resolve --collection --recursive` |
 
-### 笔记模板
+保存规则：
 
-单一模板源：
+- 文件名使用主方法名 / 系统名：`{MethodName}.md`。
+- 有 Zotero collection 时保存到 `{PaperNotes}/{collection_path}/{MethodName}.md`。
+- 无 collection 时保存到 `{PaperNotes}/_inbox/{MethodName}.md`。
+- frontmatter 写入 `zotero_item_id`、`zotero_collection`、`doi`、`arxiv_id`。
+- 批量模式默认跳过已有笔记，不重新分类或误移动。
+
+唯一论文笔记模板：
 
 ```text
 skills/paper-reader/assets/paper-note-template.md
 ```
 
-模板针对 systems / architecture 论文优化，包含：
+模板重点是 systems 论文，而不是模型能力摘要：瓶颈、优化对象、工作负载、系统假设、关键机制、实验设置、核心结果、overhead、复现和可迁移启示。
 
-- 元信息
-- 一句话总结
-- 作者核心 insights
-- 问题定义与瓶颈
-- 动机实验 / characterization
-- 系统设计总览
-- Mermaid 系统架构与执行流
-- 优化目标与度量口径
-- 系统组成与职责
-- 条件化实现改动清单
-- 关键机制拆解
-- 实验设置与核心结果
-- Overhead 与兼容性
-- 批判性思考
-- 经验与可迁移启示
-- 复现
-- 关联笔记
-- 速查卡片
+## Zotero 与笔记去重
 
-模板要求公式和图表嵌入叙事位置，不再单独生成“关键公式 / 关键图表”章节。
+`zotero_helper.py` 的默认路径是只读：
 
-### Zotero 只读集成
-
-位置：`skills/paper-reader/assets/zotero_helper.py`
-
-关键设计：
-
-- 读取 Zotero 前先复制 `zotero.sqlite` 到唯一临时文件。
-- 连接上执行 `PRAGMA query_only = ON`。
+- 读取前复制 `zotero.sqlite` 到唯一临时文件。
+- SQLite 连接设置 `PRAGMA query_only = ON`。
 - 关闭连接时删除临时库。
-- 默认不修改 Zotero collection。
-- 如果分类不合理，只在笔记或回复里提出建议，用户确认后才允许调用写命令。
+- `move`、`add-to-collection`、`remove-from-collection` 属于显式写命令，不能自动调用。
 
-collection 解析：
+`resolve` 是新入口：
 
-- item 可属于多个 collection。
-- 单篇模式中如果有多个 path，需要用户选择本次保存的 `selected_collection_path`。
-- 批量递归 collection 时，使用 item 在该 subtree 下最具体的 child collection 作为 `source_collection_path`。
-
-保存路径：
-
-```text
-{NOTES_PATH}/{selected_collection_path}/{MethodName}.md
-{NOTES_PATH}/_inbox/{MethodName}.md
+```bash
+python3 skills/paper-reader/assets/zotero_helper.py resolve --item-id 2487
+python3 skills/paper-reader/assets/zotero_helper.py resolve --query "vLLM"
+python3 skills/paper-reader/assets/zotero_helper.py resolve --collection "Research Topics/..." --recursive
 ```
 
-路径段只做文件名安全清洗；frontmatter 中的 `zotero_collection` 写清洗后的路径，保证磁盘路径与元数据一致。
+兼容期旧命令 `papers`、`search`、`info`、`find-collection` 仍可用，但会打印 deprecation warning；新文档和脚本应使用 `resolve` / `note-path`。
 
-### 已有笔记匹配
-
-`zotero_helper.py` 中的 `NoteIndex` 会扫描已有笔记，匹配优先级：
+已有笔记匹配由 `NoteIndex` 完成，优先级：
 
 1. `zotero_item_id`
 2. `doi`
@@ -250,132 +213,130 @@ collection 解析：
 4. 规范化 title
 5. method name / 文件名兜底
 
-`_inbox` 会被纳入索引，`_concepts` 和 `_index_*.md` 会被排除。多个笔记共享同一个精确 ID 时返回 conflict，不静默选第一个。
+`_inbox` 会纳入索引；`_concepts` 和 `_index_*.md` 会排除。多个笔记共享同一精确 ID 时返回 conflict，不静默选择。
 
-保存规划由 `plan_note_save()` 决定：
+## 概念库与 MOC
 
-- 无匹配：`create`
-- 单篇同路径：`update`
-- 单篇路径漂移：`move`
-- 批量模式已有笔记：默认 `skip`
-
-## 概念库
-
-规则单一信源：
+概念分类单一信源：
 
 ```text
 skills/paper-reader/references/concept-categories.md
 ```
 
-概念按 concept type 归类，而不是按研究领域归类：
+8 个 `concept_type`：
 
 | concept_type | 含义 |
 |---|---|
-| `data-structure` | 数据格式 / 表示 / 结构 |
-| `algorithm` | 脱离系统也成立的计算逻辑 |
+| `data-structure` | 数据格式、表示、结构 |
+| `algorithm` | 脱离具体系统也成立的计算逻辑 |
 | `mechanism` | 绑定系统上下文的运行时策略 |
-| `architecture` | 宏观系统架构 / 服务模式 |
-| `hardware` | 硬件部件 / 计算单元 / 物理互联 |
-| `software-abstraction` | OS / 框架层接口与协议 |
-| `metric` | 评估指标 / 测量口径 |
-| `theory-model` | 性能数学模型 / 统计基础 |
+| `architecture` | 宏观系统架构、服务模式 |
+| `hardware` | 硬件部件、计算单元、物理互联 |
+| `software-abstraction` | OS、框架层接口与协议 |
+| `metric` | 评估指标、测量口径 |
+| `theory-model` | 性能数学模型、统计基础 |
 
-paper-method 不作为正式 `concept_type`。处理分三档：
+paper-method 不是正式 `concept_type`。如果是论文首创且只在本论文实验，落到最接近类型并加 `tags: [status/paper-specific]`；如果被多篇作为 baseline 或通用实现，再升格为普通 concept。
 
-| 情形 | 处理 |
+Missing concept scan：
+
+```bash
+python3 skills/_shared/scan_missing_concepts.py --dry-run
+python3 skills/_shared/scan_missing_concepts.py --with-seed --output /tmp/missing_concepts.csv
+```
+
+扫描器排除 `_concepts/`、`_inbox/`、`_index_*.md`，并排除论文笔记之间的互链，避免把论文标题误报成概念。
+
+MOC 入口：
+
+```bash
+python3 skills/_shared/generate_concept_mocs.py
+python3 skills/_shared/generate_paper_mocs.py
+```
+
+MOC 文件名前缀来自 `mocs.filename_prefix`，当前推荐 `_index_`。内容不变时不重写，保持幂等。
+
+## 配置与自动化开关
+
+配置加载顺序：
+
+1. `skills/_shared/user_config.py` 内置 `DEFAULT_CONFIG`
+2. `skills/_shared/user-config.json`
+3. `skills/_shared/user-config.local.json`
+
+| 配置组 | 说明 |
 |---|---|
-| 论文首创且仅本论文实验 | 落到最接近 type，加 `tags: [status/paper-specific]` |
-| 具名实现且被多篇作为 baseline / 前人工作 | 升格为通用 concept |
-| 完全是前人工作且该论文只是引用 | 不独立建 concept |
+| `paths.*` | Obsidian vault、论文笔记目录、每日推荐目录、概念目录、Zotero DB / storage |
+| `daily_papers.keywords` | 主关键词 |
+| `daily_papers.negative_keywords` | 标题硬排除关键词 |
+| `daily_papers.domain_boost_keywords` | systems 相关性加分词 |
+| `daily_papers.arxiv_categories` / `min_score` / `top_n` | 抓取分类、阈值、候选上限 |
+| `automation.auto_refresh_indexes` | 生成笔记后是否刷新 MOC |
+| `automation.git_commit` | 是否自动 commit vault |
+| `automation.git_push` | 是否自动 push；只有 `git_commit=true` 时才生效 |
+| `mocs.filename_prefix` | MOC 文件名前缀 |
 
-### Seed vocabulary
+`git_push` 会在 `user_config.py` 中被校验：如果 `git_commit=false`，即使配置了 push 也会被压成 false。
 
-`concept-categories.md` 中的 “Systems Concept Seed Vocabulary” 是触发词白名单。写论文笔记时，seed list 中的术语首次出现必须写成 `[[概念名]]`，即使作者把它当常识。
+## 源码入口
 
-### 离线扫描
-
-位置：`skills/_shared/scan_missing_concepts.py`
-
-职责：
-
-- 扫描 `PaperNotes/**/*.md` 中的 `[[wikilink]]`。
-- 排除 `_concepts/`、`_inbox/`、`_index_*.md`。
-- 读取已有 concept 文件名和 frontmatter aliases。
-- 读取已有 paper note 文件名，避免把论文互链误报为 concept。
-- 可选读取 seed vocabulary，输出“应该有但还没有 concept”的候选。
-
-输出字段：
-
-```text
-concept_name, refs_count, example_papers, candidate_type
-```
-
-## MOC 目录页
-
-共享引擎：`skills/_shared/moc_builder.py`
-
-入口：
-
-```text
-skills/_shared/generate_concept_mocs.py
-skills/_shared/generate_paper_mocs.py
-```
-
-行为：
-
-- 递归扫描目录。
-- 每个目录生成一个 MOC 文件。
-- 默认文件名前缀来自 `mocs.filename_prefix`，当前配置推荐 `_index_`。
-- 目录页包含子目录链接和当前目录笔记列表。
-- 内容不变时不重写，保持幂等。
-- 论文 MOC 排除 `_concepts` 和 `_inbox`。
-
-## Obsidian vault 结构
-
-当前推荐结构：
-
-```text
-PaperRead/
-├── DailyPapers/
-│   ├── 2026-05-15-论文推荐.md
-│   └── .history.json
-└── PaperNotes/
-    ├── Research Topics/
-    │   └── LLM Infrastructure/
-    │       └── Benchmarks & Characterization/
-    │           └── Towards Understanding, Analyzing, and Optimizing Agentic AI Execution - A CPU-Centric Perspective.md
-    ├── _concepts/
-    │   ├── data-structure/
-    │   ├── algorithm/
-    │   ├── mechanism/
-    │   ├── architecture/
-    │   ├── hardware/
-    │   ├── software-abstraction/
-    │   ├── metric/
-    │   └── theory-model/
-    ├── _inbox/
-    └── _index_PaperNotes.md
-```
-
-论文目录由 Zotero collection path 决定；概念目录由 concept type 决定。两套分类独立，通过 Obsidian wikilink 连接。
-
-## 测试覆盖
-
-主要测试：
-
-| 文件 | 覆盖 |
+| 想了解 | 优先看 |
 |---|---|
-| `tests/test_fetch_and_score.py` | 抓取打分、历史去重、arXiv/DOI key、来源配额 |
-| `tests/test_enrich_papers.py` | 元数据富化、arXiv title fallback、PDF affiliation mock |
-| `tests/test_paper_daemon.py` | 批量处理、临时 Zotero DB 清理、保存路径规划 |
-| `tests/test_zotero_helper.py` | Zotero collection path、NoteIndex、note save plan |
-| `tests/test_scan_missing_concepts.py` | missing concept scan、seed vocabulary、论文互链排除 |
-| `tests/test_systems_template.py` | 模板结构、systems 章节、概念规则、Zotero 工作流 |
-| `tests/test_daily_papers_theme.py` | daily-papers 主题与默认流程 |
+| 用户入口 | `skills/daily-papers/SKILL.md`、`skills/paper-reader/SKILL.md`、`skills/generate-mocs/SKILL.md` |
+| 抓取打分 | `skills/daily-papers/fetch_and_score.py` |
+| 元数据富化 | `skills/daily-papers/enrich_papers.py`、`parse_arxiv.py`、`extract_affiliations.py` |
+| 推荐生成 | `skills/daily-papers-review/SKILL.md` |
+| 批量笔记 | `skills/daily-papers-notes/SKILL.md` |
+| Zotero 解析 | `skills/paper-reader/assets/zotero_helper.py` |
+| Zotero 批量 | `skills/paper-reader/paper_daemon.py` |
+| 论文模板 | `skills/paper-reader/assets/paper-note-template.md` |
+| 概念分类 | `skills/paper-reader/references/concept-categories.md` |
+| 配置加载 | `skills/_shared/user_config.py` |
+| MOC 生成 | `skills/_shared/moc_builder.py`、`generate_concept_mocs.py`、`generate_paper_mocs.py` |
+| 测试 | `tests/test_fetch_and_score.py`、`tests/test_zotero_helper.py`、`tests/test_scan_missing_concepts.py`、`tests/test_paper_daemon.py` |
 
-推荐验证：
+## 排错与验证
+
+| 现象 | 优先检查 |
+|---|---|
+| 推荐为空 | `keywords`、`min_score` 是否太严；标题负词是否误伤 |
+| 老论文反复推荐 | `.history.json` 是否能被 `paper_lookup_keys()` 还原成同一 key |
+| 推荐里旧会议论文过多 | `date` 是否缺失导致 `apply_age_decay()` 未生效；非 arXiv 配额是否过高 |
+| Zotero 找不到论文 | 先用 `resolve --item-id` 或 `resolve --query` 看元数据和 PDF 路径 |
+| 单篇命中多个 collection | 必须让用户选择 `selected_collection_path` |
+| 批量保存到父目录 | 检查是否使用 `source_collection_path`，而不是父 collection |
+| 目录页没更新 | 手动运行 `generate_concept_mocs.py` 和 `generate_paper_mocs.py` |
+| 概念缺失 | 运行 `scan_missing_concepts.py --dry-run`，按模板补齐 |
+| 跑完没 commit | 默认 `automation.git_commit=false` |
+
+推荐开发验证：
 
 ```bash
 pytest tests/
 git diff --check
 ```
+
+## Obsidian Hard Link
+
+目标 Obsidian 路径：
+
+```text
+/Users/bytedance/Library/Mobile Documents/iCloud~md~obsidian/Documents/ob-career/002-notes/001 使用指南/dailypaper-skills-架构和使用文档.md
+```
+
+该路径应当 hard link 到本文件：
+
+```text
+/Users/bytedance/Tools/dailypaper-skills/ARCHITECTURE.md
+```
+
+检查命令：
+
+```bash
+stat -f "%d %i %l %N" /Users/bytedance/Tools/dailypaper-skills/ARCHITECTURE.md \
+  "/Users/bytedance/Library/Mobile Documents/iCloud~md~obsidian/Documents/ob-career/002-notes/001 使用指南/dailypaper-skills-架构和使用文档.md"
+```
+
+两行的 device 和 inode 必须一致，link count 应至少为 2。
+
+注意：iCloud sync、`git checkout`、`git restore`、rebase 或某些编辑器的“写新文件再替换”行为可能打断 hard link。如果 inode 不再一致，重新备份 Obsidian 文件后删除该路径，再用 `ln ARCHITECTURE.md <Obsidian path>` 重建。

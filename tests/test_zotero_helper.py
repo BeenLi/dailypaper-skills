@@ -1,10 +1,14 @@
 import importlib.util
+import io
+import re
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -477,6 +481,53 @@ class ZoteroHelperTests(unittest.TestCase):
                 text=True,
             )
             self.assertNotIn("--json", result.stdout)
+
+    def test_legacy_commands_emit_deprecation_warning_and_continue(self):
+        cases = [
+            (["papers", "2"], "list_papers_in_collection"),
+            (["search", "EBPC"], "search_paper"),
+            (["info", "100"], "get_paper_info"),
+            (["find-collection", "Systems"], "find_collection_by_name"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "zotero.sqlite"
+            db_path.write_text("sqlite", encoding="utf-8")
+
+            for argv, handler_name in cases:
+                stderr = io.StringIO()
+                stdout = io.StringIO()
+                fake_conn = object()
+                with (
+                    patch.object(sys, "argv", [str(MODULE_PATH), *argv]),
+                    patch.object(self.module, "ZOTERO_DB", db_path),
+                    patch.object(self.module, "copy_db", return_value=fake_conn),
+                    patch.object(self.module, "close_copied_db"),
+                    patch.object(self.module, handler_name) as handler,
+                    redirect_stderr(stderr),
+                    redirect_stdout(stdout),
+                ):
+                    self.module.main()
+
+                self.assertIn("DEPRECATED", stderr.getvalue())
+                self.assertIn("zotero_helper.py resolve", stderr.getvalue())
+                handler.assert_called_once()
+
+    def test_internal_docs_and_callers_use_resolve_not_legacy_zotero_commands(self):
+        pattern = re.compile(r"zotero_helper\.py\s+(papers|search|info|find-collection)\b")
+        offenders = []
+        scan_roots = [REPO_ROOT / "skills", REPO_ROOT / "tests"]
+        skip_paths = {MODULE_PATH, Path(__file__).resolve()}
+
+        for root in scan_roots:
+            for path in root.rglob("*"):
+                if path in skip_paths or path.suffix not in {".md", ".py"}:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                for match in pattern.finditer(text):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{match.group(1)}")
+
+        self.assertEqual(offenders, [])
 
     def test_paper_mocs_exclude_inbox(self):
         text = GENERATE_PAPER_MOCS.read_text(encoding="utf-8")

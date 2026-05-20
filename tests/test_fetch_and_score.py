@@ -48,7 +48,20 @@ class FetchAndScoreTests(unittest.TestCase):
 
         score = self.module.score_paper(paper)
 
-        self.assertLess(score, 0)
+        self.assertEqual(score, -999)
+
+    def test_score_paper_does_not_hard_exclude_negative_keyword_in_abstract_only(self):
+        paper = {
+            "title": "A GPU Cluster Runtime for RDMA-Optimized LLM Serving",
+            "abstract": (
+                "The evaluation compares against a browser agent workload while "
+                "focusing on distributed inference, KV cache placement, and RDMA."
+            ),
+        }
+
+        score = self.module.score_paper(paper)
+
+        self.assertGreater(score, -999)
 
     def test_parse_dblp_proceedings_html_extracts_entries(self):
         html = """
@@ -98,6 +111,40 @@ class FetchAndScoreTests(unittest.TestCase):
 
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["title"], "Hardware-Accelerated Memory Disaggregation for LLM Serving.")
+
+    def test_parse_dblp_proceedings_html_uses_venue_month_hint(self):
+        html = """
+        <html><body>
+        <ul class="publ-list">
+          <li class="entry inproceedings">
+            <cite>
+              <span class="title" itemprop="name">Fast GPU Cluster Scheduling for LLM Serving</span>.
+            </cite>
+          </li>
+        </ul>
+        </body></html>
+        """
+
+        entries = self.module.parse_dblp_proceedings_html(html, venue="MICRO", year=2026)
+
+        self.assertEqual(entries[0]["date"], "2026-10-01")
+
+    def test_parse_journal_html_does_not_apply_conference_month_hint(self):
+        html = """
+        <html><body>
+        <ul class="publ-list">
+          <li class="entry article">
+            <cite>
+              <span class="title" itemprop="name">Efficient Storage Systems for LLM Serving</span>.
+            </cite>
+          </li>
+        </ul>
+        </body></html>
+        """
+
+        entries = self.module.parse_journal_html(html, journal_name="IEEE TPDS", year=2026)
+
+        self.assertEqual(entries[0]["date"], "2026-01-01")
 
     def test_extract_program_titles_skips_session_headers(self):
         html = """

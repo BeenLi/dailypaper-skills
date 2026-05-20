@@ -15,3 +15,5 @@ __pycache__/
 
 out/
 .ccb/
+.ccb-requests/
+.ccb-plan-forge/
