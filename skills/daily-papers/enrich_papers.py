@@ -14,6 +14,8 @@ Architecture:
     - Per-request timeout via curl --max-time (no Python-level per-paper timeout)
 """
 
+from __future__ import annotations
+
 import asyncio
 import importlib.util
 import json

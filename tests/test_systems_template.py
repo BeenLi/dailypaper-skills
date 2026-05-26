@@ -284,6 +284,23 @@ class SystemsTemplateTests(unittest.TestCase):
         for phrase in natural_guidance:
             self.assertIn(phrase, combined_text)
 
+    def test_local_pdf_image_guidance_uses_00_assets_and_note_name_prefix(self):
+        paper_reader = PAPER_READER_SKILL.read_text(encoding="utf-8")
+        daemon = PAPER_DAEMON.read_text(encoding="utf-8")
+        standards = QUALITY_STANDARDS.read_text(encoding="utf-8")
+        combined = "\n".join([paper_reader, daemon, standards])
+
+        for phrase in [
+            "00_assets",
+            "<note-name>_<原图片名>",
+            "note-name ≤ 48 字符",
+            "截断前 40 字符 + 8 位 hash",
+        ]:
+            self.assertIn(phrase, combined)
+
+        self.assertIn("![[00_assets/", combined)
+        self.assertNotRegex(combined, r"!\[\[00_assets/[^]]*\|600\]\]")
+
 
 if __name__ == "__main__":
     unittest.main()

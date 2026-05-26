@@ -73,9 +73,11 @@ description: |
 2. 技术术语首次出现要加 `[[概念]]` 链接；`references/concept-categories.md` 的 seed list 命中词，首次出现必须写成 `[[概念名]]`，即使作者把它当常识。
 3. 不用 ASCII 流程图；改用结构化 Markdown 和必要公式。
 4. 公式必须有名称和 LaTeX，并用自然段解释建模对象、变量角色及其支撑的设计或结论。
-5. 图片优先外链 arXiv HTML / 项目主页，失败再本地下载。
+5. 图片优先外链 arXiv HTML / 项目主页；如果图源是本地 PDF，则从 PDF 裁切图片并存放到笔记同目录下的 `00_assets/<note-name>_<原图片名>`，笔记中使用 `![[00_assets/<note-name>_<原图片名>]]`。
 6. Figure / Table 必须嵌入对应叙事小节，不要默认用 H3 图表标题把图表提升为 Obsidian 大纲章节；图表标题优先写成加粗图注行（如 `**Figure 3: ...**`），只有“核心结果”“消融实验”“附录图”等语义小节可以使用 `###`。
 7. 论文笔记正文禁止使用 Obsidian task 语法（`- [ ]` / `- [x]`）；核查项、复现步骤、风险项一律写成普通 bullet 或 Markdown table，避免污染 Obsidian Tasks。
+
+本地图片命名规则：`note-name ≤ 48 字符` 时直接使用 `<note-name>_` 前缀；note-name 太长时使用 `截断前 40 字符 + 8 位 hash` 作为前缀，形如 `VeryLongNoteNamePrefix_xxxxxxxx_figure.png`，避免文件名过长和重名。
 
 ### systems 方向额外要求
 
@@ -117,7 +119,7 @@ zotero_item_id: 2487
 zotero_collection: Research Topics/Lossless Communication Compression/Link & Fabric Integration
 doi: 10.1145/example
 arxiv_id: 2501.01234
-image_source: online
+image_source: online  # online / mixed / local；本地 PDF 裁图全部使用本地图片时填 local
 created: YYYY-MM-DD
 ---
 ```
@@ -156,7 +158,7 @@ created: YYYY-MM-DD
 - 正文是否没有 `- [ ]` / `- [x]` 这类 Obsidian task 语法？
 - 关键术语有 `[[概念]]` 内联链接？
 - 概念库已更新？
-- 图片可用？
+- 图片可用？本地 PDF 裁图是否写入 `00_assets/`，并按 `<note-name>_<原图片名>` 或长 note-name hash 规则命名？
 - 系统假设、瓶颈和性能结果是否解释清楚？
 - `Overhead 与兼容性` 是否写清面积、额外延时、资源占用或工程复杂度？
 - `经验与可迁移启示` 是否写清可迁移 lesson、评测方法和 related work 价值？

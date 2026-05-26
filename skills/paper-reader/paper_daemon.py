@@ -439,12 +439,34 @@ Obsidian 保存计划: 未提供。必须先调用 `zotero_helper.py note-path` 
 优先使用 HTML 版本，因为可以直接获取在线图片链接！
 """
 
+    local_pdf_image_instruction = ""
+    if paper_source.get('pdf_path'):
+        target_note_name = "note-name"
+        if save_plan and save_plan.get("target_path"):
+            target_note_name = Path(save_plan["target_path"]).stem
+        local_pdf_image_instruction = f"""
+## 本地 PDF 图片裁切规则（重要）
+
+这篇论文有本地 PDF。如果图源是本地，请从 PDF 裁切图片，并存放到笔记同目录下：
+
+```text
+00_assets/<note-name>_<原图片名>
+```
+
+- 当前 note-name: `{target_note_name}`
+- note-name ≤ 48 字符：直接用 `<note-name>_` 作为前缀。
+- note-name 太长：使用 `截断前 40 字符 + 8 位 hash` 作为前缀，形如 `VeryLongNoteNamePrefix_xxxxxxxx_figure.png`。
+- 笔记正文用 `![[00_assets/<note-name>_<原图片名>]]` 引用本地图片。
+- 如果所有图片都来自本地 PDF，frontmatter 写 `image_source: local`；如果在线和本地混用，写 `image_source: mixed`。
+"""
+
     prompt = f"""请使用 `paper-reader` skill 读取并分析这篇论文，生成完整的结构化笔记。
 
 {source_info}
 Zotero ItemID: {item_id}
 {save_instruction}
 {no_pdf_instruction}
+{local_pdf_image_instruction}
 
 ## 质量要求（重要）
 
@@ -453,7 +475,7 @@ Zotero ItemID: {item_id}
 1. **元信息表格**: 机构、日期、项目主页、主对比基线
 2. **内联概念链接**: 在正文中使用 `[[KV Cache]]`、`[[Roofline Model]]`、`[[AllReduce]]` 链接概念，不只是在文末；`skills/paper-reader/references/concept-categories.md` 的 seed list 命中词，首次出现必须写成 `[[概念名]]`
 3. **公式格式**: 每个公式后用自然段解读它建模的系统现象、变量角色，以及它支撑的设计或结论；必要时在段落中解释符号
-4. **图片格式**: `**Figure X: 英文标题 / 中文标题**` + 在线URL + 自然段解读；说明图片在论文论证链中的作用、关键趋势或定量证据，禁止保留填空式模板标签；不要把普通 Figure / Table 写成 `###` 大纲标题
+4. **图片格式**: `**Figure X: 英文标题 / 中文标题**` + 图片引用 + 自然段解读；优先在线 URL，本地图源必须用 `![[00_assets/<note-name>_<原图片名>]]`；说明图片在论文论证链中的作用、关键趋势或定量证据，禁止保留填空式模板标签；不要把普通 Figure / Table 写成 `###` 大纲标题
 5. **系统结构**: `系统架构与执行流` 优先使用 Obsidian Mermaid（默认 `flowchart LR`），随后用自然段解释边界、输入输出、离线/在线分工和支撑的设计或结论
 6. **组件与实现**: `系统组成与职责` 写真实模块职责；`实现改动清单` 按硬件 / software runtime / characterization 条件生成，不要对纯软件论文强行写硬件表
 7. **关键机制**: 不要单独拆出公式或图示小节；Figure、公式、Mermaid 必须嵌入机制说明或参数与权衡的叙事位置
@@ -466,7 +488,7 @@ Zotero ItemID: {item_id}
 
 ## 处理规则
 
-1. **图片优先在线链接**：先检查 arXiv HTML 版本 (arxiv.org/html/xxx)，有则用在线图片 URL
+1. **图片优先在线链接**：先检查 arXiv HTML 版本 (arxiv.org/html/xxx)，有则用在线图片 URL；如果图源是本地 PDF，则从 PDF 裁切到 `00_assets/<note-name>_<原图片名>`
 2. **不要生成 Obsidian task**：论文笔记正文禁止出现 `- [ ]` / `- [x]`；复现核查、后续步骤和风险项都写成普通表格或普通 bullet
 
 ## 概念库更新（必须执行）

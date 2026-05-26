@@ -55,6 +55,8 @@
 2. **图片** - 外链优先（arXiv HTML、项目主页等），找不到再本地
 3. **自然段解读** - 解释图片在论文论证链中的作用、关键趋势或定量证据，以及它支撑的设计或结论；不要保留填空式模板标签
 
+如果图源是本地 PDF，必须从 PDF 裁切图片并存放到笔记同目录下的 `00_assets/<note-name>_<原图片名>`；笔记中使用 `![[00_assets/<note-name>_<原图片名>]]`。`note-name ≤ 48 字符` 时直接用 `<note-name>_`；note-name 太长时使用 `截断前 40 字符 + 8 位 hash`，形如 `VeryLongNoteNamePrefix_xxxxxxxx_figure.png`。
+
 ### Obsidian 大纲层级规范
 
 图表完整性不能以污染 Obsidian 大纲为代价。
@@ -81,7 +83,7 @@
 - 论文有多少张 Figure？笔记中全部包含？
 - 普通 Figure 是否用加粗图注行，而不是 H3 大纲标题？
 - 外链 URL 对应正确 Figure？
-- 无外链的已下载到本地 `assets/` 并用 `![[]]` 嵌入？
+- 无外链的已下载或从 PDF 裁切到本地 `00_assets/`，并按 `<note-name>_<原图片名>` / 长 note-name hash 规则用 `![[]]` 嵌入？
 - 项目主页有额外图片？已补充？
 
 公式：
