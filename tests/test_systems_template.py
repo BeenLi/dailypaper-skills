@@ -284,6 +284,21 @@ class SystemsTemplateTests(unittest.TestCase):
         for phrase in natural_guidance:
             self.assertIn(phrase, combined_text)
 
+    def test_image_titles_live_in_image_captions_not_separate_lines(self):
+        template_text = ASSET_TEMPLATE.read_text(encoding="utf-8")
+        paper_reader = PAPER_READER_SKILL.read_text(encoding="utf-8")
+        daemon_text = PAPER_DAEMON.read_text(encoding="utf-8")
+        standards_text = QUALITY_STANDARDS.read_text(encoding="utf-8")
+        combined_text = "\n".join([template_text, paper_reader, daemon_text, standards_text])
+
+        self.assertNotIn("加粗图注行", combined_text)
+        self.assertNotIn("`**Figure X:", combined_text)
+        self.assertNotIn("`**Figure 3:", combined_text)
+
+        image_refs = re.findall(r"!\[([^\]]*)\]\([^)]*\)", template_text)
+        self.assertTrue(image_refs)
+        self.assertTrue(all(caption.startswith("Figure ") for caption in image_refs))
+
     def test_local_pdf_image_guidance_uses_00_assets_and_note_name_prefix(self):
         paper_reader = PAPER_READER_SKILL.read_text(encoding="utf-8")
         daemon = PAPER_DAEMON.read_text(encoding="utf-8")

@@ -74,7 +74,7 @@ description: |
 3. 不用 ASCII 流程图；改用结构化 Markdown 和必要公式。
 4. 公式必须有名称和 LaTeX，并用自然段解释建模对象、变量角色及其支撑的设计或结论。
 5. 图片优先外链 arXiv HTML / 项目主页；如果图源是本地 PDF，则从 PDF 裁切图片并存放到笔记同目录下的 `00_assets/<note-name>_<原图片名>`，笔记中使用 `![[00_assets/<note-name>_<原图片名>]]`。
-6. Figure / Table 必须嵌入对应叙事小节，不要默认用 H3 图表标题把图表提升为 Obsidian 大纲章节；图表标题优先写成加粗图注行（如 `**Figure 3: ...**`），只有“核心结果”“消融实验”“附录图”等语义小节可以使用 `###`。
+6. Figure / Table 必须嵌入对应叙事小节，不要默认用 H3 图表标题把图表提升为 Obsidian 大纲章节；图片标题写进图片引用的题注/alt 文本（如 `![Figure 3: ...](...)`），不要在图片上方单独写 `**Figure ...**` 标题；只有“核心结果”“消融实验”“附录图”等语义小节可以使用 `###`。
 7. 论文笔记正文禁止使用 Obsidian task 语法（`- [ ]` / `- [x]`）；核查项、复现步骤、风险项一律写成普通 bullet 或 Markdown table，避免污染 Obsidian Tasks。
 
 本地图片命名规则：`note-name ≤ 48 字符` 时直接使用 `<note-name>_` 前缀；note-name 太长时使用 `截断前 40 字符 + 8 位 hash` 作为前缀，形如 `VeryLongNoteNamePrefix_xxxxxxxx_figure.png`，避免文件名过长和重名。
@@ -155,6 +155,7 @@ created: YYYY-MM-DD
 - 所有公式都在笔记中？
 - 所有 Table 完整保留？
 - Obsidian 大纲是否干净：没有把普通 `Figure X` / `Table X` 单独提升成 `###` 章节？
+- `系统组成与职责` 小节是否包含 `#### 模块关系图`，且其下方有 Mermaid 模块关系图和自然段解释？不能只用 `系统架构与执行流`、论文原图或组件表替代；生成后要用 `mmdc` 校验 Mermaid（若环境可用）。
 - 正文是否没有 `- [ ]` / `- [x]` 这类 Obsidian task 语法？
 - 关键术语有 `[[概念]]` 内联链接？
 - 概念库已更新？
