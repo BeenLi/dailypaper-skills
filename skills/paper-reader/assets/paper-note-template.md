@@ -22,7 +22,8 @@ created: {date}
 4. “批判性思考”合并原来的局限、隐含假设和失效场景分析。
 5. 保留“关联笔记”和“速查卡片”，方便 Obsidian 中后续导航和回顾。
 6. Obsidian 大纲层级只给语义结构使用，不要把普通图片写成 H3 或独立加粗标题；图片标题写进图片引用的题注/alt 文本，如 `![Figure 3: ...](...)`。
-7. `相关工作定位` 中：
+7. `## 关键机制拆解` 到下一个 `##` 之间，所有 `###` 标题必须是 `### 机制N：{机制名}`；机制内部只有按论文结构或 Agent 理解提炼出的语义子小节才可以使用 `####`，例如设计动机、机制流程、算法流程、pipeline stage、实现要点、参数权衡。普通单张 Figure / Table / 单个公式不要单独写成 `####` 小节，只能嵌入对应语义小节的自然段。
+8. `相关工作定位` 中：
    - `论文` 列优先写 `[[笔记名]]`，没有内部笔记时写纯标题。
    - `外部链接` 列写 `[arXiv](...)` / `[DOI](...)` / `[Paper](...)`，没有就留空。
 -->
@@ -183,6 +184,8 @@ flowchart TB
 
 ## 关键机制拆解
 
+<!-- Template check: 本节从 `## 关键机制拆解` 到下一个 `##` 之间，所有 H3 必须匹配 `### 机制N：...`。H4 只能是机制内部的语义子小节；普通单张 Figure / Table / 单个公式必须内联到自然段，不要单独做成 H4。 -->
+
 ### 机制1：{名称}
 
 #### 设计动机
@@ -270,14 +273,25 @@ $$
 
 ### 模拟器与微架构参数
 
-| 项目 | 配置 |
-|------|------|
-| Simulator / Framework | {gem5 / ChampSim / ZSim / 真实平台等} |
-| CPU pipeline | {宽度、ROB、fetch/decode/commit 等} |
-| Branch predictor / BTB | {预测器、BTB、RAS、FTQ 等} |
-| Cache hierarchy | {L1 / L2 / LLC 配置} |
-| Memory system | {DRAM / NVM / network / storage 配置} |
-| Warmup / simulation length | {warmup 与采样长度} |
+```mermaid
+flowchart LR
+    workload["Workload / trace"] --> driver["Evaluation driver"]
+    driver --> system["System under test"]
+    system --> compute["Compute resources<br/>CPU / GPU"]
+    system --> memory["Memory resources<br/>DRAM / HBM / cache"]
+    system --> fabric["Network / storage<br/>NIC / SSD / fabric"]
+    system --> metrics["Metrics collector"]
+```
+
+{根据论文的 evaluation platform 改写这张图：只展示测试系统大概长什么样、组件如何连接、需要哪些硬件或模拟资源。优先画 client / benchmark driver / scheduler or runtime / worker / accelerator / memory / network / storage / simulator 的连接关系；不要把 CPU pipeline、cache level、BTB、ROB 等微架构细节硬塞进图里，除非它们就是论文评测对象。}
+
+| 资源 / 组件 | 配置 | 在评测中的作用 |
+|-------------|------|----------------|
+| Simulator / Framework | {gem5 / ChampSim / ZSim / 真实平台 / 集群环境等} | {模拟或承载哪一层系统} |
+| Compute resources | {CPU / GPU / accelerator / worker 数量与型号} | {执行模型、runtime、kernel 或仿真的角色} |
+| Memory / Storage | {DRAM / HBM / KV cache / SSD / remote storage 等关键容量或带宽} | {支撑 workload 的状态、cache、数据或 checkpoint} |
+| Network / Fabric | {NIC / PCIe / NVLink / Ethernet / InfiniBand 等，如适用} | {承担通信、远程访问或分布式训练 / serving 流量} |
+| Scale / Run length | {节点数、batch、trace 长度、warmup、采样长度等} | {决定实验规模与可复现边界} |
 
 {如果有定义 workload、trace、platform 或评测边界的 Figure / Table / 公式，直接嵌入对应小节的自然段中解释，不单独拆出图表小节。}
 

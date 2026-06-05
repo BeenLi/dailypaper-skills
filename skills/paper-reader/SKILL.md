@@ -74,7 +74,7 @@ description: |
 3. 不用 ASCII 流程图；改用结构化 Markdown 和必要公式。
 4. 公式必须有名称和 LaTeX，并用自然段解释建模对象、变量角色及其支撑的设计或结论。
 5. 图片优先外链 arXiv HTML / 项目主页；如果图源是本地 PDF，则从 PDF 裁切图片并存放到笔记同目录下的 `00_assets/<note-name>_<原图片名>`，笔记中使用 `![[00_assets/<note-name>_<原图片名>]]`。
-6. Figure / Table 必须嵌入对应叙事小节，不要默认用 H3 图表标题把图表提升为 Obsidian 大纲章节；图片标题写进图片引用的题注/alt 文本（如 `![Figure 3: ...](...)`），不要在图片上方单独写 `**Figure ...**` 标题；只有“核心结果”“消融实验”“附录图”等语义小节可以使用 `###`。
+6. Figure / Table / 单个公式必须嵌入对应叙事小节，不要默认用 H3/H4 图表或公式标题把素材提升为 Obsidian 大纲章节；图片标题写进图片引用的题注/alt 文本（如 `![Figure 3: ...](...)`），不要在图片上方单独写 `**Figure ...**` 标题；只有“核心结果”“消融实验”“附录图”等语义小节可以使用 `###`，只有按论文结构或 Agent 理解提炼出的机制子小节才可以使用 `####`。
 7. 论文笔记正文禁止使用 Obsidian task 语法（`- [ ]` / `- [x]`）；核查项、复现步骤、风险项一律写成普通 bullet 或 Markdown table，避免污染 Obsidian Tasks。
 
 本地图片命名规则：`note-name ≤ 48 字符` 时直接使用 `<note-name>_` 前缀；note-name 太长时使用 `截断前 40 字符 + 8 位 hash` 作为前缀，形如 `VeryLongNoteNamePrefix_xxxxxxxx_figure.png`，避免文件名过长和重名。
@@ -85,6 +85,7 @@ description: |
 - 对 runtime / compiler / networking / memory / scheduling 这类关键机制，优先按数据流或执行流程解释。
 - 读 LLM systems 论文时，不要把重点写成模型能力；重点是计算、存储、通信和调度机制。
 - 笔记必须包含 `实验设置`、`核心结果`、`Overhead 与兼容性`、`经验与可迁移启示`、`复现`。
+- `实验设置` 的 `模拟器与微架构参数` 小节必须根据论文 evaluation platform 画一张 Mermaid 测试系统连接关系图，展示 client / driver / runtime / worker / accelerator / memory / network / storage / simulator 等组件如何连接、需要哪些硬件资源；可以删减和图重复的参数表细节，不要为了完整性硬塞 CPU pipeline、BTB、ROB 等微架构参数，除非它们就是评测对象。
 - `复现` 小节里的核查内容使用 `### 复现核查表`，优先写成 `项目 / 结论 / 证据或缺口` 三列表格；不要使用英文 checklist 标题，也不要用 `- [ ]` task list。
 - 必须明确写出 baseline 是否公平、实验设置是否足够复现、部署假设是否现实。
 
@@ -154,8 +155,10 @@ created: YYYY-MM-DD
 - 所有 Figure 都在笔记中？
 - 所有公式都在笔记中？
 - 所有 Table 完整保留？
-- Obsidian 大纲是否干净：没有把普通 `Figure X` / `Table X` 单独提升成 `###` 章节？
+- Template 检查：是否对照 `assets/paper-note-template.md` 验证必备章节与层级？尤其 `## 关键机制拆解` 到下一个 `##` 之间，所有 `###` 是否都匹配 `### 机制N：...`，且 Algorithm / pipeline / 公式解释 / 图表解读 / 实现细节没有与机制并列？
+- Obsidian 大纲是否干净：没有把普通 `Figure X` / `Table X` / 单个公式提升成 `###` 或 `####` 章节？`####` 是否只用于机制内部的语义子小节？
 - `系统组成与职责` 小节是否包含 `#### 模块关系图`，且其下方有 Mermaid 模块关系图和自然段解释？不能只用 `系统架构与执行流`、论文原图或组件表替代；生成后要用 `mmdc` 校验 Mermaid（若环境可用）。
+- `实验设置` 的 `模拟器与微架构参数` 小节是否包含 evaluation platform Mermaid 连接关系图，并说明测试系统形态与硬件资源需求？是否删除了和图重复、且对读者理解测试系统无帮助的参数细节？
 - 正文是否没有 `- [ ]` / `- [x]` 这类 Obsidian task 语法？
 - 关键术语有 `[[概念]]` 内联链接？
 - 概念库已更新？
