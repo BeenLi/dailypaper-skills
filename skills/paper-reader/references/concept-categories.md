@@ -134,7 +134,7 @@ tags: [status/paper-specific]  # 仅在 paper-specific 时加
 | `data-structure` | `## 内存视图 / 字段布局` | 字段分布、字节大小、对齐、布局图 |
 | `algorithm` | `## 步骤` + `## 复杂度` | 伪代码 / 步骤列表;时空复杂度;典型变体 |
 | `mechanism` | `## 状态与触发条件` + `## 关键参数` | 触发条件、状态转移、可调参数 |
-| `architecture` | `## 组件与接口` | **必须** Mermaid `flowchart LR` 画组件图(遵守 `~/.claude/skills/mermaid-rules/SKILL.md`:label 引号包裹、节点 ID 语义化、配色 ≤5);不允许 ASCII 状态图替代;描述接口契约;生成后用 `mmdc -i x.mmd -o x.png` 或 https://mermaid.live 校验 |
+| `architecture` | `## 组件与接口` | **必须** Mermaid `flowchart` 画组件图（按规则选 LR / TB）(遵守 `~/.claude/skills/_shared/mermaid-rules.md`:label 引号包裹、节点 ID 语义化、配色 ≤5);不允许 ASCII 状态图替代;描述接口契约;生成后按该规则渲染成 PNG、看图并重排 |
 | `hardware` | `## 接口与典型参数` | 指令 / API 接口、峰值算力 / 带宽、典型规格、演进史 |
 | `software-abstraction` | `## API 与生命周期` | 关键 API 签名、初始化-使用-销毁的生命周期 |
 | `metric` | `## 测量方法` | 怎么测、单位、典型范围、好 / 坏阈值参考 |
