@@ -41,6 +41,20 @@ class MdEscapeCheckTest(unittest.TestCase):
         source = "# T\n\n---\n\nB 在 C1 为 M[0]\n\n---\n"
         self.assertEqual([line for line, _ in check(source)], [5])
 
+    def test_escapes_accidental_tags(self):
+        self.assertEqual(fix("| #SMs | #Warps |"), r"| \#SMs | \#Warps |")
+        self.assertEqual(fix("#include <x>"), r"\#include <x>")
+        self.assertEqual(fix("ratio: #L3HitFraction / Clk"), r"ratio: \#L3HitFraction / Clk")
+
+    def test_keeps_headings_numbers_and_non_tags(self):
+        source = "# Title\n## Sub\n第 #1 名，C# 与 F#，issue #42\n"
+        self.assertEqual(fix(source), source)
+
+    def test_keeps_intentional_tags(self):
+        source = "- [ ] 写周报 #t/2h ⏫\n- [ ] 复现 #t/halfday\n"
+        self.assertEqual(fix(source), source)
+        self.assertEqual(check(source), [])
+
     def test_check_reports_line_numbers(self):
         hits = check("ok\nE[est] ≈ T\n")
         self.assertEqual([line for line, _ in hits], [2])
