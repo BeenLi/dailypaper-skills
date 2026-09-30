@@ -19,11 +19,12 @@ _SHARED_DIR = Path(__file__).resolve().parents[2] / "_shared"
 if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 
-from user_config import paper_notes_dir, zotero_db_path, zotero_storage_dir
+from user_config import paper_notes_dir, zotero_base_attachment_dir, zotero_db_path, zotero_storage_dir
 
 # 默认配置
 ZOTERO_DB = zotero_db_path()
 STORAGE_DIR = zotero_storage_dir()
+BASE_ATTACHMENT_DIR = zotero_base_attachment_dir()
 ZOTERO_DIR = ZOTERO_DB.parent
 
 DEPRECATED_COMMAND_REPLACEMENTS = {
@@ -243,7 +244,20 @@ def get_item_authors(conn, item_id: int) -> list[str]:
             (item_id,),
         )
     except sqlite3.OperationalError:
-        return []
+        # Zotero 5+ schema: names live directly in `creators` (no creatorData table).
+        try:
+            cursor.execute(
+                """
+                SELECT c.firstName, c.lastName, NULL
+                FROM itemCreators ic
+                JOIN creators c ON ic.creatorID = c.creatorID
+                WHERE ic.itemID = ?
+                ORDER BY ic.orderIndex
+                """,
+                (item_id,),
+            )
+        except sqlite3.OperationalError:
+            return []
 
     authors = []
     for first_name, last_name, short_name in cursor.fetchall():
@@ -256,29 +270,48 @@ def get_item_authors(conn, item_id: int) -> list[str]:
     return authors
 
 
+def _not_deleted_clause(conn, column: str) -> str:
+    """Exclude items in Zotero's trash when the deletedItems table exists."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='deletedItems'"
+    ).fetchone()
+    return f"AND {column} NOT IN (SELECT itemID FROM deletedItems)" if row else ""
+
+
 def resolve_pdf_path(conn, item_id: int, storage_dir: Path = STORAGE_DIR) -> Optional[str]:
     cursor = conn.cursor()
     cursor.execute(
-        """
+        f"""
         SELECT ia.path, items.key
         FROM itemAttachments ia
         JOIN items ON ia.itemID = items.itemID
         WHERE ia.parentItemID = ? AND ia.contentType = 'application/pdf'
+        {_not_deleted_clause(conn, "ia.itemID")}
         ORDER BY ia.itemID
-        LIMIT 1
         """,
         (item_id,),
     )
-    row = cursor.fetchone()
-    if not row:
+    rows = [row for row in cursor.fetchall() if row[0]]
+    if not rows:
         return None
 
-    attachment_path, attachment_key = row
-    if not attachment_path:
-        return None
+    # Prefer the first attachment whose file actually exists (stale linked files are common after moves).
+    candidates = [_attachment_to_path(path, key, storage_dir) for path, key in rows]
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+    return candidates[0]
+
+
+def _attachment_to_path(attachment_path: str, attachment_key: str, storage_dir: Path) -> str:
     if attachment_path.startswith("storage:"):
         filename = attachment_path.replace("storage:", "", 1)
         return str(Path(storage_dir) / attachment_key / filename)
+    if attachment_path.startswith("attachments:"):
+        relative = attachment_path.replace("attachments:", "", 1)
+        if BASE_ATTACHMENT_DIR is None:
+            return attachment_path
+        return str(BASE_ATTACHMENT_DIR / relative)
     return str(Path(attachment_path).expanduser())
 
 
@@ -1034,9 +1067,14 @@ def get_pdf_path(conn, item_id):
     row = cursor.fetchone()
     if row:
         path, key, title = row
+        full_path = None
         if path and path.startswith('storage:'):
-            filename = path.replace('storage:', '')
-            full_path = STORAGE_DIR / key / filename
+            full_path = STORAGE_DIR / key / path.replace('storage:', '')
+        elif path and path.startswith('attachments:') and BASE_ATTACHMENT_DIR is not None:
+            full_path = BASE_ATTACHMENT_DIR / path.replace('attachments:', '')
+        elif path:
+            full_path = Path(path).expanduser()
+        if full_path is not None:
             print(f"标题: {title}")
             print(f"PDF路径: {full_path}")
             if full_path.exists():

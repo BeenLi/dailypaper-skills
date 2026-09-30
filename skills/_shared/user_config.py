@@ -14,6 +14,7 @@ DEFAULT_CONFIG = {
         "concepts_folder": "_概念",
         "zotero_db": "~/Zotero/zotero.sqlite",
         "zotero_storage": "~/Zotero/storage",
+        "zotero_base_attachment_path": "",
     },
     "daily_papers": {
         "keywords": [
@@ -186,6 +187,12 @@ def zotero_db_path() -> Path:
 
 def zotero_storage_dir() -> Path:
     return _expand(paths_config()["zotero_storage"])
+
+
+def zotero_base_attachment_dir() -> Path | None:
+    """Base directory for linked files stored as `attachments:<relpath>` (ZotMoov etc.)."""
+    value = paths_config().get("zotero_base_attachment_path") or ""
+    return _expand(value) if value else None
 
 
 def auto_refresh_indexes_enabled() -> bool:
