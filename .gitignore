@@ -17,3 +17,6 @@ out/
 .ccb/
 .ccb-requests/
 .ccb-plan-forge/
+
+# Personal machine-specific config overrides
+skills/_shared/user-config.local.json
