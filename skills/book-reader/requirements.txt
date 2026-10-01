@@ -1,0 +1,5 @@
+pymupdf
+pypdf
+ebooklib
+mobi
+beautifulsoup4

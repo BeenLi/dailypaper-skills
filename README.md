@@ -72,7 +72,7 @@ cp -R ./skills/* ~/.codex/skills/
 
 ```bash
 mkdir -p ~/.codex/skills
-for d in paper-reader daily-papers daily-papers-fetch daily-papers-review daily-papers-notes generate-mocs _shared; do
+for d in paper-reader book-reader daily-papers daily-papers-fetch daily-papers-review daily-papers-notes generate-mocs _shared; do
   ln -sfn "$PWD/skills/$d" "$HOME/.codex/skills/$d"
 done
 ```
@@ -161,6 +161,7 @@ skills/
 ├── daily-papers-notes/    # 可选批量精读
 ├── generate-mocs/         # 手动刷新目录页
 ├── paper-reader/          # 单篇论文阅读与 Zotero 集成
+├── book-reader/           # 整本书读书笔记与全书思维导图（MIT, Tao Jiang）
 └── _shared/               # 配置、MOC 生成、概念扫描
 ```
 
