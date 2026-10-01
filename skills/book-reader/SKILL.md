@@ -153,10 +153,13 @@ python3 ~/.claude/skills/book-reader/scripts/extract_book.py <book_path> -o work
 ## 思维导图
 
 ```mermaid
-mindmap
-  root(("{书名短称}"))
-    Part1["{主题块} ChX–Y"]
-      P1A["{核心论点}"]
+%%{init: {"flowchart": {"nodeSpacing": 8, "rankSpacing": 50, "curve": "stepBefore"}}}%%
+flowchart LR
+  Root(["{书名短称}"]):::hub
+  Root --- Part1["{主题块} ChX–Y"]:::c1
+    Part1 --- P1A["{核心结论}"]:::c1
+  classDef hub fill:#1f3a93,color:#fff,stroke:#1f3a93
+  classDef c1 fill:#fff4b3,color:#222,stroke:#999
 ```
 
 {2-4 句：跨分支依赖关系与建议阅读路径}
@@ -190,13 +193,13 @@ mindmap
 
 ### Phase 4.5 — 绘制并校验全书思维导图
 
-`## 章节要点` 写完后再画导图：导图是章节要点的压缩，不是另起炉灶。严格按 `references/mindmap-rules.md` 执行：
+`## 章节要点` 写完后再画导图：导图是章节要点的压缩，不是另起炉灶。导图画成左根右叶的树状图（Mermaid `flowchart LR`，不用 `mindmap`），严格按 `references/mindmap-rules.md` 执行：
 
-1. 把全书按论证主线合并成 3–5 个主题块（第 1 层），每块 3–5 个结论型节点（第 2 层）。全图目标 18–24 个节点，硬上限 26 个；块数 × 每块节点数要落在预算内，例如 4 块 × 4–5 个。
-2. 用 `-s 3` 实际渲染，**整图和 root 居中裁剪图都要用 Read 打开看**，按 `references/mindmap-rules.md` §3 检查。
-3. 不通过就按 §3.4 的优先级修：删节点 > 合并节点 > 合并第 1 层分支。截断的标签只缩短，不扩写。修完后两张图都要重新渲染、重新检查。不要为了微调布局而改写措辞。
+1. 把全书按论证主线合并成 3–5 个主题块（第 1 层），每块 3–5 个结论型节点（第 2 层）。全图目标 18–26 个节点，硬上限 30 个。
+2. 套用 `references/mindmap-rules.md` §2 的语法模板，`init` 行、`---` 连线、`hub`/`cN` 配色都照抄。
+3. 浅色、深色主题各实际渲染一次，两张图都用 Read 打开，按 §3 检查树形、颜色、深色可读性、文字完整和高度。不通过就修，修完重新渲染、重新检查。
 4. 在导图下方写说明段，依次写：跨分支依赖、阅读路径、因预算省略的主题。
-5. 超长书籍按 `references/mindmap-rules.md` §5 处理，在 `_detail/` 详细版中补充各分支子图。
+5. 超长书籍按 §5 处理，在 `_detail/` 详细版中补充各分支子图。
 6. 汇报时如实写明导图是“已渲染校验（N 个节点）”还是“未能渲染”。
 
 ### Phase 5 — 输出为本地 Markdown 文件
@@ -257,7 +260,7 @@ created: {YYYY-MM-DD}
 - "正在解析 {格式} 文件... 共 {N} 页/章"
 - "已提取 {M}/{N} 内容单元的知识点"
 - "正在生成最终读书笔记..."
-- "思维导图已渲染校验（{N} 个节点）"
+- "思维导图（树状）已渲染校验：浅色和深色主题，{N} 个节点"
 - "读书笔记已生成，已保存到 Obsidian：{markdown\_path}"
 
 ## 目录结构
@@ -268,5 +271,5 @@ book-reader/
 ├── scripts/
 │   └── extract_book.py   # 多格式文本提取脚本（PDF/EPUB/MOBI/TXT）
 └── references/
-    └── mindmap-rules.md  # 思维导图结构、节点预算、语法与看图检查项
+    └── mindmap-rules.md  # 树状思维导图的结构、节点预算、语法模板与看图检查项
 ```
