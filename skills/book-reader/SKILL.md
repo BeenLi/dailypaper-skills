@@ -153,7 +153,7 @@ python3 ~/.claude/skills/book-reader/scripts/extract_book.py <book_path> -o work
 ## 思维导图
 
 ```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 8, "rankSpacing": 50, "curve": "stepBefore"}}}%%
+%%{init: {"flowchart": {"nodeSpacing": 8, "rankSpacing": 50, "curve": "stepBefore", "wrappingWidth": 320}}}%%
 flowchart LR
   Root(["{书名短称}"]):::hub
   Root --- Part1["{主题块} ChX–Y"]:::c1
@@ -195,10 +195,10 @@ flowchart LR
 
 `## 章节要点` 写完后再画导图：导图是章节要点的压缩，不是另起炉灶。导图画成左根右叶的树状图（Mermaid `flowchart LR`，不用 `mindmap`），严格按 `references/mindmap-rules.md` 执行：
 
-1. 把全书按论证主线合并成 3–5 个主题块（第 1 层），每块 3–5 个结论型节点（第 2 层）。全图目标 18–26 个节点，硬上限 30 个。
+1. 把全书按论证主线合并成 3–5 个主题块（第 1 层），每块 3–5 个结论型节点（第 2 层）。全图目标 18–26 个节点，硬上限 30 个。`章节要点` 的每个 `###` / `####` 小节都要有对应节点；超过上限时合并压缩，不省略。
 2. 套用 `references/mindmap-rules.md` §2 的语法模板，`init` 行、`---` 连线、`hub`/`cN` 配色都照抄。
-3. 浅色、深色主题各实际渲染一次，两张图都用 Read 打开，按 §3 检查树形、颜色、深色可读性、文字完整和高度。不通过就修，修完重新渲染、重新检查。
-4. 在导图下方写说明段，依次写：跨分支依赖、阅读路径、因预算省略的主题。
+3. 浅色、深色主题各实际渲染一次，两张图都用 Read 打开，按 §3 检查树形、颜色、深色可读性、覆盖完整、文字完整和高度。不通过就修，修完重新渲染、重新检查。
+4. 在导图下方写说明段，依次写：跨分支依赖、阅读路径。
 5. 超长书籍按 §5 处理，在 `_detail/` 详细版中补充各分支子图。
 6. 汇报时如实写明导图是“已渲染校验（N 个节点）”还是“未能渲染”。
 
